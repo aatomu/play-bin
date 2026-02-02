@@ -1,60 +1,100 @@
 package main
 
 import (
-	"context"
+	"bufio"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"sync"
+	"time"
 
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 	"github.com/gorilla/websocket"
-	"github.com/moby/moby/client"
 )
 
+// MARK: var
 var (
 	upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
-	// セッション管理 (Token -> Username)
+
+	cli         *client.Client
 	sessions    = make(map[string]string)
 	sessionLock sync.RWMutex
-	// Attach排他制御 (ContainerID -> isLocked)
 	attachLocks = make(map[string]bool)
 	lockMutex   sync.Mutex
+
+	lc = &loadedConfig{}
 )
 
+// MARK: main()
 func main() {
-	// Dockerクライアントの初期化 (環境変数 DOCKER_HOST 等を参照)
-	cli, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	var err error
+	// MARK: Docker client
+	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Fatalf("Docker接続失敗: %v", err)
 	}
 
-	// --- 静的ファイル配信 ---
-	http.Handle("/", http.FileServer(http.Dir("./")))
-
-	// --- REST API ---
-	// ログイン
-	http.HandleFunc("/api/login", handleLogin)
-	// コンテナ一覧
-	http.HandleFunc("/api/containers", auth(func(w http.ResponseWriter, r *http.Request) {
-		containers, err := cli.ContainerList(r.Context(), client.ContainerListOptions{All: true})
+	// MARK: Http server
+	mux := http.NewServeMux()
+	// MARK: > File server
+	mux.Handle("/", http.FileServer(http.Dir("./")))
+	// MARK: > API server
+	mux.HandleFunc("/api/login", handleLogin)
+	mux.HandleFunc("/api/containers", auth(func(w http.ResponseWriter, r *http.Request) {
+		containers, err := cli.ContainerList(r.Context(), container.ListOptions{All: true})
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
 		}
+
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+
+		sessionLock.RLock()
+		username := sessions[token]
+		sessionLock.RUnlock()
+
+		cfg := getConfig()
+		user := cfg.Users[username]
+
+		// フィルタリング
+		filtered := []container.Summary{}
+		for _, c := range containers {
+			isAllowed := false
+			// 最初の1つをチェック
+			if len(c.Names) > 0 {
+				// 先頭の "/" を消す
+				name := c.Names[0][1:]
+
+				for _, pattern := range user.Controllable {
+					if pattern == "*" || pattern == name {
+						isAllowed = true
+						break
+					}
+				}
+			}
+
+			if isAllowed {
+				filtered = append(filtered, c)
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(containers)
+		json.NewEncoder(w).Encode(filtered)
 	}))
-	// 詳細情報取得 (Inspect)
-	http.HandleFunc("/api/container/inspect", auth(func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/api/container/inspect", auth(func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		inspect, err := cli.ContainerInspect(r.Context(), id, client.ContainerInspectOptions{})
+		inspect, err := cli.ContainerInspect(r.Context(), id)
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
@@ -62,155 +102,206 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(inspect)
 	}))
+	// MARK: > Websocket
+	mux.HandleFunc("/ws/terminal", auth(handleTerminal()))
+	mux.HandleFunc("/ws/stats", auth(handleStats()))
 
-	// --- WebSockets ---
-	// ターミナル (Attach / Exec)
-	http.HandleFunc("/ws/terminal", handleTerminal(cli))
-	// リソース監視 (Stats)
-	http.HandleFunc("/ws/stats", handleStats(cli))
-
-	fmt.Println("Admin Console Server started at :1031")
-	log.Fatal(http.ListenAndServe(":1031", nil))
+	listen := getConfig().Listen
+	log.Printf("Console Server started at \"%s\"", listen)
+	log.Fatal(http.ListenAndServe(listen, middleware(mux)))
 }
 
-// 認証ミドルウェア (HeaderまたはURLクエリからトークンを確認)
-func auth(next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("Authorization")
-		if token == "" {
-			token = r.URL.Query().Get("token")
-		}
-		sessionLock.RLock()
-		_, ok := sessions[token]
-		sessionLock.RUnlock()
-		if !ok {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next(w, r)
+// MARK: Config
+type loadedConfig struct {
+	Config
+	lastLoaded time.Time
+	mu         sync.RWMutex
+}
+type Config struct {
+	Listen string                `json:"listen"`
+	Users  map[string]ConfigUser `json:"users"`
+}
+
+type ConfigUser struct {
+	Password     string   `json:"password"`
+	Controllable []string `json:"controllable"`
+}
+
+func getConfig() Config {
+	lc.mu.RLock()
+	info, err := os.Stat("./config.json")
+
+	if err == nil && info.ModTime().After(lc.lastLoaded) {
+		lc.mu.RUnlock()
+		updateConfig(info.ModTime())
+		lc.mu.RLock()
 	}
+	defer lc.mu.RUnlock()
+
+	return lc.Config
 }
 
-// ログイン処理: ランダムなトークンを生成してメモリに保持
+func updateConfig(modTime time.Time) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+
+	if !modTime.After(lc.lastLoaded) {
+		return
+	}
+
+	f, err := os.Open("./config.json")
+	if err != nil {
+		log.Printf("Config読み込み失敗: %v", err)
+		return
+	}
+	defer f.Close()
+
+	var newCfg Config
+	if err := json.NewDecoder(f).Decode(&newCfg); err != nil {
+		log.Printf("Configパース失敗: %v", err)
+		return
+	}
+
+	lc.Config = newCfg
+	lc.lastLoaded = modTime
+	log.Println("Configを自動リロードしました")
+}
+
+// MARK: Access log
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := lrw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("ResponseWriter does not implement http.Hijacker")
+	}
+	return hijacker.Hijack()
+}
+
+func middleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+
+		// ステータスコードのキャプチャ用ラッパー
+		lrw := &loggingResponseWriter{w, http.StatusOK}
+
+		next.ServeHTTP(lrw, r)
+
+		log.Printf("%s %s %s %d %v %s",
+			r.Method,
+			r.URL.Path,
+			r.RemoteAddr,
+			lrw.statusCode,
+			time.Since(start),
+			r.UserAgent(),
+		)
+	})
+}
+
+// MARK: Websocket()
+type wsBinaryWriter struct{ *websocket.Conn }
+
+func (w *wsBinaryWriter) Write(p []byte) (int, error) {
+	if w.Conn == nil {
+		return 0, os.ErrInvalid // または適当なエラー
+	}
+	err := w.WriteMessage(websocket.BinaryMessage, p)
+	return len(p), err
+}
+
+// MARK: handleLogin()
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, "Invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// ユーザー確認
+	cfg := getConfig()
+	user, ok := cfg.Users[creds.Username]
+	if !ok || user.Password != creds.Password {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// トークン生成
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 	token := hex.EncodeToString(tokenBytes)
 
+	// セッション保存 (ユーザーIDを紐付け)
 	sessionLock.Lock()
-	sessions[token] = "admin" // 簡易的に admin 固定
+	sessions[token] = creds.Username
 	sessionLock.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
-// ターミナル制御 (WS Bridge)
-func handleTerminal(cli *client.Client) http.HandlerFunc {
-	return auth(func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		id, mode := q.Get("id"), q.Get("mode")
-		ctx := context.Background()
-		var stream net.Conn
-
-		switch mode {
-		case "attach":
-			lockMutex.Lock()
-			if attachLocks[id] {
-				lockMutex.Unlock()
-				http.Error(w, "Locked", 409)
-				return
-			}
-			attachLocks[id] = true
-			lockMutex.Unlock()
-			defer func() { lockMutex.Lock(); delete(attachLocks, id); lockMutex.Unlock() }()
-
-			resp, err := cli.ContainerAttach(ctx, id, client.ContainerAttachOptions{
-				Stream: true, Stdin: true, Stdout: true, Stderr: true,
-			})
-			if err != nil {
-				return
-			}
-			stream = resp.Conn
-		case "exec":
-			cfg := client.ExecCreateOptions{
-				TTY: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
-				Env: []string{"TERM=xterm-256color"}, Cmd: []string{"/bin/sh"},
-			}
-			cExec, err := cli.ExecCreate(ctx, id, cfg)
-			if err != nil {
-				return
-			}
-			resp, err := cli.ExecAttach(ctx, cExec.ID, client.ExecAttachOptions{TTY: true})
-			if err != nil {
-				return
-			}
-			stream = resp.Conn
+// MARK: auth()
+func auth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// セッションチェック
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
 		}
-		defer stream.Close()
 
-		ws, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
+		sessionLock.RLock()
+		username, ok := sessions[token]
+		sessionLock.RUnlock()
+
+		if !ok {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		defer ws.Close()
 
-		// パニック回避用の Once と 同期用チャネル
-		var once sync.Once
-		done := make(chan struct{})
+		// 権限チェック
+		containerID := r.URL.Query().Get("id")
+		if containerID != "" {
+			cfg := getConfig()
+			user, exists := cfg.Users[username]
+			if !exists {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
 
-		// 片付け用の関数
-		cleanup := func() {
-			once.Do(func() {
-				close(done)
-				stream.Close() // ここでストリームを閉じれば読み取りループも終わる
-			})
-		}
+			// Dockerからコンテナの実際の名前を取得
+			inspect, err := cli.ContainerInspect(r.Context(), containerID)
+			if err != nil {
+				http.Error(w, "Container Not Found", http.StatusNotFound)
+				return
+			}
+			// 先頭の "/" を消す
+			realName := inspect.Name[1:]
 
-		// Docker -> WebSocket
-		go func() {
-			defer cleanup()
-			io.Copy(&wsBinaryWriter{ws}, stream)
-		}()
-
-		// WebSocket -> Docker
-		go func() {
-			defer cleanup()
-			for {
-				_, msg, err := ws.ReadMessage()
-				if err != nil {
-					return
+			allowed := false
+			for _, pattern := range user.Controllable {
+				if pattern == "*" || pattern == realName {
+					allowed = true
+					break
 				}
-				stream.Write(msg)
 			}
-		}()
 
-		// どちらかが終わるまで待機
-		<-done
-	})
-}
-
-// リソース統計 (Docker Stats APIをWSで中継)
-func handleStats(cli *client.Client) http.HandlerFunc {
-	return auth(func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
-		ws, _ := upgrader.Upgrade(w, r, nil)
-		defer ws.Close()
-
-		stats, err := cli.ContainerStats(context.Background(), id, client.ContainerStatsOptions{Stream: true})
-		if err != nil {
-			return
+			if !allowed {
+				log.Printf("Permission Denied: user=%s, target_name=%s", username, realName)
+				http.Error(w, "Forbidden: No permission for this container name", http.StatusForbidden)
+				return
+			}
 		}
-		defer stats.Body.Close()
 
-		io.Copy(&wsBinaryWriter{ws}, stats.Body)
-	})
-}
-
-// WebSocket書き込み用ラッパー
-type wsBinaryWriter struct{ *websocket.Conn }
-
-func (w *wsBinaryWriter) Write(p []byte) (int, error) {
-	err := w.WriteMessage(websocket.BinaryMessage, p)
-	return len(p), err
+		next(w, r)
+	}
 }
