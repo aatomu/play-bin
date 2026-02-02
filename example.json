@@ -1,0 +1,26 @@
+{
+  "mount": {
+    "home": "/home/server/"
+  },
+  "user": {
+    "uid": 1000,
+    "gid": 1000,
+    "password": "1000"
+  },
+  "discord": {
+    "token": "",
+    "adminRoleId": "",
+    "webhookUrl": ""
+  },
+  "command": {
+    "start": "",
+    "stop": "",
+    "kill": "",
+    "backup": "",
+    "restore": ""
+  },
+  "trigger": {
+    "onExit": "",
+    "onMessage": ""
+  }
+}
