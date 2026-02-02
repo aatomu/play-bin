@@ -14,6 +14,9 @@
             --panel: #1a1a1a;
             --border: #333;
             --accent: #0081cc;
+            --danger: #cc3333;
+            --success: #4caf50;
+            --warning: #f39c12;
             --text: #eee;
             --muted: #888;
         }
@@ -25,10 +28,38 @@
             height: 100%;
             background: var(--bg);
             color: var(--text);
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            font-family: 'Inter', sans-serif;
             overflow: hidden;
         }
 
+        /* --- モーダル --- */
+        #modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 2000;
+        }
+
+        .modal {
+            background: var(--panel);
+            padding: 25px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            width: 350px;
+            text-align: center;
+        }
+
+        .modal-btns {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        /* --- レイアウト --- */
         #login-screen {
             position: fixed;
             inset: 0;
@@ -60,28 +91,48 @@
         }
 
         button {
-            padding: 8px 16px;
+            padding: 6px 12px;
             cursor: pointer;
             border-radius: 4px;
             border: 1px solid var(--border);
             background: #333;
             color: white;
             font-size: 12px;
+            transition: 0.2s;
+        }
+
+        button:hover {
+            background: #444;
         }
 
         button.primary {
             background: var(--accent);
             border: none;
             font-weight: bold;
-            width: 100%;
-            padding: 12px;
+        }
+
+        button.danger {
+            background: var(--danger);
+            border: none;
+        }
+
+        button.success {
+            background: var(--success);
+            border: none;
+        }
+
+        button.warning {
+            background: var(--warning);
+            border: none;
+            color: #000;
+            font-weight: bold;
         }
 
         #app {
             display: none;
             height: 100vh;
             grid-template-columns: 260px 1fr;
-            grid-template-rows: 50px 1fr 200px;
+            grid-template-rows: 50px 1fr 220px;
         }
 
         header {
@@ -130,8 +181,8 @@
         }
 
         .dot.running {
-            background: #4caf50;
-            box-shadow: 0 0 8px #4caf50;
+            background: var(--success);
+            box-shadow: 0 0 8px var(--success);
         }
 
         #main-content {
@@ -158,13 +209,18 @@
             justify-content: space-between;
             align-items: center;
             font-size: 13px;
-            border-bottom: 1px solid var(--border);
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 5px;
+            align-items: center;
         }
 
         #xterm-container {
             flex: 1;
             position: relative;
-            background-color: #000;
+            background: #000;
         }
 
         #term-placeholder {
@@ -178,15 +234,14 @@
             z-index: 5;
         }
 
-        /* --- 下部パネルのレイアウト修正 --- */
         #detail-panel {
             grid-column: 2;
             background: var(--panel);
             border-top: 1px solid var(--border);
-            padding: 15px;
+            padding: 12px;
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 15px;
+            grid-template-columns: 200px 200px 1fr 1fr;
+            gap: 12px;
         }
 
         .metric-card {
@@ -196,27 +251,28 @@
             border: 1px solid #333;
             display: flex;
             flex-direction: column;
-            justify-content: center;
+            overflow-y: auto;
         }
 
         .metric-label {
-            font-size: 10px;
+            font-size: 9px;
             color: var(--muted);
             text-transform: uppercase;
-            margin-bottom: 4px;
+            margin-bottom: 2px;
         }
 
         .metric-value {
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             color: var(--accent);
+            margin-bottom: 8px;
         }
 
         .progress-bg {
             height: 4px;
             background: #333;
             border-radius: 2px;
-            margin-top: 6px;
+            margin-bottom: 4px;
             overflow: hidden;
         }
 
@@ -224,14 +280,13 @@
             height: 100%;
             background: var(--accent);
             width: 0%;
-            transition: width 0.3s ease;
+            transition: width 0.3s;
         }
 
-        /* 詳細グリッド用スタイル */
         .info-grid {
             display: grid;
-            grid-template-columns: 75px 1fr;
-            gap: 6px;
+            grid-template-columns: 85px 1fr;
+            gap: 4px;
             font-size: 11px;
             color: #ccc;
         }
@@ -241,18 +296,30 @@
             font-weight: bold;
             text-transform: uppercase;
             font-size: 9px;
-            align-self: center;
         }
 
-        .info-grid span:nth-child(even) {
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        .scroll-list {
+            font-size: 10px;
+            color: #aaa;
+            margin-top: 2px;
+            border-top: 1px solid #333;
+            padding-top: 4px;
         }
     </style>
 </head>
 
 <body>
+
+    <div id="modal-overlay">
+        <div class="modal">
+            <h3 id="modal-title">Confirm Action</h3>
+            <p id="modal-body" style="font-size: 14px; color: var(--muted);">Are you sure?</p>
+            <div class="modal-btns">
+                <button onclick="closeModal()">Cancel</button>
+                <button id="modal-confirm-btn" class="primary">Execute</button>
+            </div>
+        </div>
+    </div>
 
     <div id="login-screen">
         <div class="login-card">
@@ -281,12 +348,22 @@
                 <div class="term-header">
                     <span id="term-name">Console: No Container Selected</span>
                     <div class="btn-group">
-                        <button onclick="connectTerminal('attach')">Attach</button>
-                        <button onclick="connectTerminal('exec')">Exec</button>
+                        <button id="btn-start" class="success" onclick="confirmAction('start')" style="display:none;">Start</button>
+                        <button id="btn-stop" class="danger" onclick="confirmAction('stop')" style="display:none;">Stop</button>
+
+                        <span id="control-divider" style="margin: 0 5px; border-left: 1px solid #444; height: 20px; display:none;"></span>
+
+                        <span id="term-controls" style="display: flex; gap: 5px;">
+                            <button id="btn-attach" class="warning" onclick="confirmAction('attach')">Attach</button>
+                            <button id="btn-exec" onclick="connectTerminal('exec')">Exec</button>
+                            <button id="btn-logs" onclick="connectTerminal('logs')">Tail Logs</button>
+                        </span>
+
+                        <button id="btn-disconnect" class="danger" onclick="disconnectTerminal()" style="display:none;">Disconnect</button>
                     </div>
                 </div>
                 <div id="xterm-container">
-                    <div id="term-placeholder">Select a container and click Attach/Exec</div>
+                    <div id="term-placeholder">Select a container</div>
                     <div id="terminal" style="height: 100%;"></div>
                 </div>
             </div>
@@ -299,134 +376,128 @@
                 <div class="progress-bg">
                     <div id="cpu-bar" class="progress-fill"></div>
                 </div>
-
-                <div class="metric-label" style="margin-top:12px;">Memory</div>
+                <div class="metric-label">Memory Usage</div>
                 <div class="metric-value" id="mem-text">-</div>
                 <div class="progress-bg">
                     <div id="mem-bar" class="progress-fill"></div>
                 </div>
+                <div class="metric-label">PID</div>
+                <div class="metric-value" id="info-pid" style="color:#eee;">-</div>
             </div>
-
             <div class="metric-card">
+                <div class="metric-label">Status</div>
+                <div class="metric-value" id="info-status">-</div>
                 <div class="metric-label">Uptime</div>
                 <div class="metric-value" id="uptime-text">-</div>
-
-                <div class="metric-label" style="margin-top:12px;">Storage Driver</div>
-                <div class="metric-value" id="info-driver" style="font-size:14px;">-</div>
-                <div style="font-size:10px; color:var(--muted);" id="info-disk-size">Size: -</div>
+                <div class="metric-label">Started At</div>
+                <div id="info-started" style="font-size:10px; color:#eee;">-</div>
             </div>
-
             <div class="metric-card">
                 <div class="info-grid">
-                    <span>IP Addr</span><span id="info-ip">-</span>
-                    <span>Gateway</span><span id="info-gw">-</span>
-                    <span>Image</span><span id="info-img">-</span>
-                    <span>Created</span><span id="info-created">-</span>
+                    <span>Net Mode</span><span id="info-netmode">-</span>
+                    <span>Restart Pol</span><span id="info-restart">-</span>
+                    <span>Auto Remove</span><span id="info-autoremove">-</span>
+                    <span>Ports Bind</span><span></span>
                 </div>
+                <div id="info-ports" class="scroll-list"></div>
             </div>
-
             <div class="metric-card">
-                <div class="info-grid">
-                    <span>Status</span><span id="info-status">-</span>
-                    <span>Restart</span><span id="info-restart">-</span>
-                    <span>Path</span><span id="info-path">-</span>
-                    <span>Args</span><span id="info-args">-</span>
-                </div>
+                <div class="metric-label">Mounts (Dest / Type)</div>
+                <div id="info-mounts" class="scroll-list" style="max-height: 140px;"></div>
             </div>
         </div>
     </div>
 
     <script>
-        let token = "", selectedId = "", wsTerm, wsStats;
-        let termDataListener;
+        let token = "", selectedId = "", selectedName = "", wsTerm, wsStats, termDataListener;
 
-        const term = new Terminal({
-            convertEol: true,
-            cursorBlink: true,
-            theme: { background: '#000' },
-            fontSize: 13,
-            fontFamily: 'Menlo, Monaco, "Courier New", monospace'
-        });
-
+        const term = new Terminal({ convertEol: true, cursorBlink: true, theme: { background: '#000' }, fontSize: 13 });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
 
-        window.addEventListener('resize', () => {
-            try { fitAddon.fit(); } catch (e) { }
-        });
+        window.addEventListener('resize', () => { try { fitAddon.fit(); } catch (e) { } });
+
+        // --- モーダル制御 (Attachにも対応) ---
+        function confirmAction(action) {
+            if (!selectedId) return;
+            const overlay = document.getElementById('modal-overlay');
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+
+            document.getElementById('modal-title').innerText = `Container ${action.toUpperCase()}`;
+
+            if (action === 'attach') {
+                document.getElementById('modal-body').innerText = `WARNING: Attaching to "${selectedName.replace('/', '')}" connects directly to the main process. If you send Ctrl+C, the container might stop. Continue?`;
+                confirmBtn.onclick = () => { connectTerminal('attach'); closeModal(); };
+            } else {
+                document.getElementById('modal-body').innerText = `Are you sure you want to ${action} "${selectedName.replace('/', '')}"?`;
+                confirmBtn.onclick = () => { executeContainerAction(action); closeModal(); };
+            }
+
+            overlay.style.display = 'flex';
+        }
+
+        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+
+        async function executeContainerAction(action) {
+            try {
+                const res = await fetch(`/api/container/${action}?id=${selectedId}`, { method: 'POST', headers: { 'Authorization': token } });
+                if (!res.ok) throw new Error(`${action} failed`);
+                setTimeout(() => { fetchContainers(); loadInspectData(selectedId); }, 1000);
+            } catch (e) { alert(e.message); }
+        }
 
         async function doLogin() {
-            const userEl = document.getElementById('user');
-            const passEl = document.getElementById('password');
-            const loginBtn = document.querySelector('#login-form button');
-
+            const userEl = document.getElementById('user'), passEl = document.getElementById('password');
             try {
-                loginBtn.disabled = true;
-                loginBtn.innerText = "Logging in...";
-
                 const res = await fetch('/api/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username: userEl.value, password: passEl.value })
                 });
-
                 if (!res.ok) throw new Error("Login failed");
-
-                const data = await res.json();
-                token = data.token;
-
+                token = (await res.json()).token;
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('app').style.display = 'grid';
-
                 setTimeout(() => fitAddon.fit(), 100);
                 fetchContainers();
-
-            } catch (e) {
-                alert("Login error: " + e.message);
-                loginBtn.disabled = false;
-                loginBtn.innerText = "Login";
-            }
+            } catch (e) { alert(e.message); }
         }
 
         async function fetchContainers() {
             try {
                 const res = await fetch('/api/containers', { headers: { 'Authorization': token } });
                 const data = await res.json();
-                let items = Array.isArray(data) ? data : (data.Items || []);
-
-                document.getElementById('list-target').innerHTML = items.map(c => `
-                    <div class="container-item" id="c-${c.Id}" onclick="selectContainer('${c.Id}', '${c.Names[0]}')">
-                        <div class="dot ${c.State === 'running' ? 'running' : ''}"></div>
-                        ${c.Names[0].replace('/', '')}
-                    </div>
-                `).join('');
+                const items = Array.isArray(data) ? data : (data.Items || []);
+                document.getElementById('list-target').innerHTML = items.map(c => {
+                    const cName = (c.Names && c.Names[0]) ? c.Names[0].replace('/', '') : (c.Name || 'Unknown');
+                    return `<div class="container-item ${selectedId === c.Id ? 'active' : ''}" id="c-${c.Id}" onclick="selectContainer('${c.Id}', '${cName}')">
+                        <div class="dot ${c.State === 'running' ? 'running' : ''}"></div>${cName}</div>`;
+                }).join('');
             } catch (e) { console.error(e); }
         }
 
         function selectContainer(id, name) {
-            selectedId = id;
+            if (selectedId === id) return;
+            selectedId = id; selectedName = name;
             document.querySelectorAll('.container-item').forEach(el => el.classList.remove('active'));
-            const activeEl = document.getElementById(`c-${id}`);
-            if (activeEl) activeEl.classList.add('active');
+            document.getElementById(`c-${id}`)?.classList.add('active');
             document.getElementById('term-name').innerText = `Console: ${name}`;
-
-            resetUI();
+            disconnectTerminal();
             loadInspectData(id);
         }
 
-        function resetUI() {
-            if (wsTerm) { wsTerm.close(); wsTerm = null; }
-            if (wsStats) { wsStats.close(); wsStats = null; }
+        function toggleTermButtons(connected) {
+            document.getElementById('term-controls').style.display = connected ? 'none' : 'flex';
+            document.getElementById('btn-disconnect').style.display = connected ? 'inline-block' : 'none';
+        }
+
+        function disconnectTerminal() {
+            if (wsTerm) wsTerm.close();
+            if (termDataListener) { termDataListener.dispose(); termDataListener = null; }
             term.reset();
             document.getElementById('term-placeholder').style.display = 'flex';
-            // Reset metrics
-            ['cpu-text', 'mem-text', 'uptime-text', 'info-driver', 'info-ip', 'info-img'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.innerText = "-";
-            });
-            document.getElementById('cpu-bar').style.width = "0%";
-            document.getElementById('mem-bar').style.width = "0%";
+            toggleTermButtons(false);
         }
 
         async function loadInspectData(id) {
@@ -434,48 +505,59 @@
                 const res = await fetch(`/api/container/inspect?id=${id}`, { headers: { 'Authorization': token } });
                 const json = await res.json();
                 const info = json.Raw || json;
+                const isRunning = info.State?.Running;
 
-                // Block 2: Uptime & Disk
+                document.getElementById('btn-start').style.display = isRunning ? 'none' : 'inline-block';
+                document.getElementById('btn-stop').style.display = isRunning ? 'inline-block' : 'none';
+                document.getElementById('control-divider').style.display = 'inline-block';
+                // 停止中はAttach/Exec/Logsは無効化（logsは過去分が見れる場合もあるが、基本非表示で実装）
+                document.getElementById('term-controls').style.opacity = isRunning ? '1' : '0.3';
+                document.getElementById('term-controls').style.pointerEvents = isRunning ? 'auto' : 'none';
+
+                document.getElementById('info-status').innerText = (info.State?.Status || "-").toUpperCase();
+                document.getElementById('info-pid').innerText = info.State?.Pid || "0";
                 const started = new Date(info.State?.StartedAt);
+                document.getElementById('info-started').innerText = isNaN(started) ? "-" : started.toLocaleString();
                 const uptime = isNaN(started) ? 0 : Math.floor((new Date() - started) / 1000 / 60);
-                document.getElementById('uptime-text').innerText = info.State?.Running ? `${uptime} mins` : "Stopped";
-                document.getElementById('info-driver').innerText = info.Driver || "N/A";
-                document.getElementById('info-disk-size').innerText = "Size: " + (info.HostConfig?.StorageOpt?.size || "Default");
+                document.getElementById('uptime-text').innerText = isRunning ? `${uptime} mins` : "Stopped";
+                document.getElementById('info-netmode').innerText = info.HostConfig?.NetworkMode || "default";
+                document.getElementById('info-restart').innerText = info.HostConfig?.RestartPolicy?.Name || "no";
+                document.getElementById('info-autoremove').innerText = info.HostConfig?.AutoRemove ? "Yes" : "No";
 
-                // Block 3: Info A
-                document.getElementById('info-ip').innerText = info.NetworkSettings?.IPAddress || "Host/None";
-                document.getElementById('info-gw').innerText = info.NetworkSettings?.Gateway || "-";
-                document.getElementById('info-img').innerText = (info.Config?.Image || "").split('@')[0];
-                document.getElementById('info-created').innerText = new Date(info.Created).toLocaleDateString();
+                let p = ""; const pb = info.HostConfig?.PortBindings || {};
+                for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
+                document.getElementById('info-ports').innerHTML = p || "none";
+                document.getElementById('info-mounts').innerHTML = (info.Mounts || []).map(m =>
+                    `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`
+                ).join('') || "none";
 
-                // Block 4: Info B
-                document.getElementById('info-status').innerText = info.State?.Status || "-";
-                document.getElementById('info-restart').innerText = (info.RestartCount || 0) + " times";
-                document.getElementById('info-path').innerText = info.Path || "-";
-                document.getElementById('info-args').innerText = (info.Args || []).join(' ') || "none";
-
-                startStats(id);
-            } catch (e) { console.error(e); }
+                if (isRunning) startStats(id);
+                else if (wsStats) wsStats.close();
+            } catch (e) { }
         }
 
         function connectTerminal(mode) {
             if (!selectedId) return;
-            if (wsTerm) wsTerm.close();
-            if (termDataListener) { termDataListener.dispose(); termDataListener = null; }
-
+            disconnectTerminal();
             document.getElementById('term-placeholder').style.display = 'none';
-            term.reset();
 
-            const wsUrl = `ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}`;
-            wsTerm = new WebSocket(wsUrl);
+            // mode: attach, exec, logs
+            wsTerm = new WebSocket(`ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}`);
             wsTerm.binaryType = 'arraybuffer';
 
-            wsTerm.onopen = () => { fitAddon.fit(); term.focus(); };
-            wsTerm.onmessage = (e) => { term.write(new Uint8Array(e.data)); };
-            wsTerm.onclose = () => { document.getElementById('term-placeholder').style.display = 'flex'; };
+            wsTerm.onopen = () => {
+                fitAddon.fit();
+                term.focus();
+                toggleTermButtons(true);
+                if (mode === 'logs') term.write('\x1b[33m--- Tail Logs (Streaming) ---\x1b[0m\r\n');
+            };
+            wsTerm.onmessage = (e) => term.write(new Uint8Array(e.data));
+            wsTerm.onclose = () => toggleTermButtons(false);
+            wsTerm.onerror = () => toggleTermButtons(false);
 
+            // logsモードの時は入力を送らないように制限可能
             termDataListener = term.onData(data => {
-                if (wsTerm && wsTerm.readyState === WebSocket.OPEN) wsTerm.send(data);
+                if (wsTerm?.readyState === 1 && mode !== 'logs') wsTerm.send(data);
             });
         }
 
@@ -484,31 +566,16 @@
             wsStats = new WebSocket(`ws://${location.host}/ws/stats?id=${id}&token=${token}`);
             wsStats.onmessage = async (e) => {
                 try {
-                    const text = (e.data instanceof Blob) ? await e.data.text() : e.data;
-                    const s = JSON.parse(text);
-
-                    // CPU Calculation
-                    const cpuUsage = s.cpu_stats?.cpu_usage?.total_usage || 0;
-                    const preCpuUsage = s.precpu_stats?.cpu_usage?.total_usage || 0;
-                    const systemUsage = s.cpu_stats?.system_cpu_usage || 0;
-                    const preSystemUsage = s.precpu_stats?.system_cpu_usage || 0;
-                    const cpuDelta = cpuUsage - preCpuUsage;
-                    const sysDelta = systemUsage - preSystemUsage;
-
-                    let cpu = 0;
-                    if (sysDelta > 0 && cpuDelta > 0) {
-                        cpu = ((cpuDelta / sysDelta) * 100 * (s.cpu_stats.online_cpus || 1)).toFixed(2);
-                    }
-
-                    // Memory Calculation
-                    const memUsed = (s.memory_stats?.usage || 0) / 1024 / 1024;
-                    const memLimit = (s.memory_stats?.limit || 1) / 1024 / 1024;
-                    const memPercent = ((s.memory_stats?.usage || 0) / (s.memory_stats?.limit || 1)) * 100;
-
+                    const s = JSON.parse((e.data instanceof Blob) ? await e.data.text() : e.data);
+                    const cpuDelta = (s.cpu_stats.cpu_usage.total_usage - s.precpu_stats.cpu_usage.total_usage);
+                    const sysDelta = (s.cpu_stats.system_cpu_usage - s.precpu_stats.system_cpu_usage);
+                    const cpu = sysDelta > 0 ? ((cpuDelta / sysDelta) * 100 * s.cpu_stats.online_cpus).toFixed(2) : 0;
+                    const memUsed = (s.memory_stats.usage / 1024 / 1024).toFixed(1);
+                    const memPct = (s.memory_stats.usage / s.memory_stats.limit * 100).toFixed(1);
                     document.getElementById('cpu-text').innerText = `${cpu}%`;
                     document.getElementById('cpu-bar').style.width = `${Math.min(cpu, 100)}%`;
-                    document.getElementById('mem-text').innerText = `${memUsed.toFixed(1)} MiB`;
-                    document.getElementById('mem-bar').style.width = `${Math.min(memPercent, 100)}%`;
+                    document.getElementById('mem-text').innerText = `${memUsed} MiB`;
+                    document.getElementById('mem-bar').style.width = `${memPct}%`;
                 } catch (err) { }
             };
         }
