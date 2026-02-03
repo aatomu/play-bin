@@ -11,12 +11,27 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
+type ReadNullWriteCloser struct {
+	r io.ReadCloser
+}
+
+func (n *ReadNullWriteCloser) Write(b []byte) (int, error) {
+	return io.Discard.Write(b)
+}
+func (n *ReadNullWriteCloser) Read(b []byte) (int, error) {
+	return n.r.Read(b)
+}
+
+func (n *ReadNullWriteCloser) Close() error {
+	return n.r.Close()
+}
+
 func handleTerminal() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		id, mode := q.Get("id"), q.Get("mode")
 		ctx := context.Background()
-		var stream net.Conn
+		var stream io.ReadWriteCloser
 		var isTty bool
 
 		// コンテナのTTY設定を事前に確認
@@ -59,6 +74,25 @@ func handleTerminal() http.HandlerFunc {
 				return
 			}
 			stream = resp.Conn
+		case "logs":
+			// logsモードの実装
+			logOptions := container.LogsOptions{
+				ShowStdout: true,
+				ShowStderr: true,
+				Follow:     true,
+				Timestamps: false,
+				Tail:       "all", // 全文表示
+			}
+			logs, err := cli.ContainerLogs(ctx, id, logOptions)
+			if err != nil {
+				http.Error(w, err.Error(), 500)
+				return
+			}
+
+			stream = &ReadNullWriteCloser{
+				r: logs,
+			}
+
 		}
 		defer stream.Close()
 
