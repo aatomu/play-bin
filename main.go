@@ -102,6 +102,8 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(inspect)
 	}))
+	mux.HandleFunc("/api/container/start", auth(handleContainerAction("start")))
+	mux.HandleFunc("/api/container/stop", auth(handleContainerAction("stop")))
 	// MARK: > Websocket
 	mux.HandleFunc("/ws/terminal", auth(handleTerminal()))
 	mux.HandleFunc("/ws/stats", auth(handleStats()))

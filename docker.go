@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"net"
 	"net/http"
 	"sync"
 
@@ -159,5 +158,25 @@ func handleStats() http.HandlerFunc {
 		defer stats.Body.Close()
 
 		io.Copy(&wsBinaryWriter{ws}, stats.Body)
+	}
+}
+
+func handleContainerAction(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.URL.Query().Get("id")
+		var err error
+
+		switch action {
+		case "start":
+			err = cli.ContainerStart(r.Context(), id, container.StartOptions{})
+		case "stop":
+			err = cli.ContainerStop(r.Context(), id, container.StopOptions{})
+		}
+
+		if err != nil {
+			http.Error(w, err.Error(), 500)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
 	}
 }
