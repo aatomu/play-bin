@@ -1,0 +1,131 @@
+[
+  {
+    "comment": "サーバー起動開始",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (Starting minecraft server version .*)"
+    ],
+    "action": "bypass",
+    "command": "server_starting"
+  },
+  {
+    "comment": "サーバー起動",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (Done \\(.+?s\\)! For help, type \"help\")"
+    ],
+    "type": "server_started",
+    "webhook": {
+      "content": "$1",
+      "username": "Server"
+    }
+  },
+  {
+    "comment": "サーバー停止開始",
+    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: (Stopping server)"],
+    "type": "server_stopping",
+    "webhook": {
+      "content": "$1",
+      "username": "Server"
+    }
+  },
+  {
+    "comment": "ワールド保存",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: ThreadedAnvilChunkStorage: (All dimensions are saved)"
+    ],
+    "type": "server_save",
+    "webhook": {
+      "content": "$1",
+      "username": "Server"
+    }
+  },
+  {
+    "comment": "Join",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (joined the game)"
+    ],
+    "type": "player",
+    "webhook": {
+      "content": "",
+      "username": "**$1** $2"
+    }
+  },
+  {
+    "comment": "Left",
+    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (left the game)"],
+    "type": "player",
+    "webhook": {
+      "content": "",
+      "username": "**$1** $2"
+    }
+  },
+  {
+    "comment": "Advancement",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (has made the advancement .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (has completed the challenge .*)"
+    ],
+    "type": "player",
+    "webhook": {
+      "content": "",
+      "username": "**$1** $2"
+    }
+  },
+  {
+    "comment": "Chat",
+    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: <(.+?)> (.*)"],
+    "type": "message",
+    "webhook": {
+      "content": "$2",
+      "username": "$1"
+    }
+  },
+  {
+    "comment": "Death",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (was.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (fell.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (went.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (walked into .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (drowned.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (died.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (blew up)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (hit the ground .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (experienced kinetic energy.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (fell from a high place)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (froze to death)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (discovered the floor was lava)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (suffocated in a wall.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (tried to swim in lava.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (burned to death)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (left the confines of this world.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (didn't want to live in the same world as .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (starved to death.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (withered away.*)"
+    ],
+    "type": "death",
+    "webhook": {
+      "content": "",
+      "username": "**$1** $2"
+    }
+  },
+  {
+    "comment": "Other",
+    "regexp": [
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*default to:.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*now set to:.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*server operator.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*to the whitelist.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*from the whitelist.*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*\\[Server\\] .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*\\[Rcon\\] .*)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: Server closed)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: Timed out)",
+      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: You logged in from another location)"
+    ],
+    "type": "bypass",
+    "webhook": {
+      "content": "$1",
+      "username": "Server"
+    }
+  }
+]
