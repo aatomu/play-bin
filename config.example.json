@@ -1,0 +1,36 @@
+{
+  "listen": ":1031",
+  "users": {
+    "admin": {
+      "password": "0000",
+      "controllable": ["sftp_server", "tunnel", "discord_voicevox", "netdata"]
+    }
+  },
+  "servers": {
+    "newyear": {
+      "workingDir": "/home/atomu/code/other/server/java/newyear_1.20.4",
+      "mount": {},
+      "image": "mc_java:21",
+      "commands": {
+        "start": "java -Xmx1G -Xms1G -jar server.jar",
+        "stop": [
+          {
+            "mode": "attach",
+            "arg": "stop\n"
+          }
+        ],
+        "backup": [
+          {
+            "src": "/MC",
+            "dest": "/backup"
+          }
+        ]
+      },
+      "discord": {
+        "token": "",
+        "webhook": "",
+        "logSetting": ""
+      }
+    }
+  }
+}
