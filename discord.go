@@ -48,10 +48,9 @@ func updateBots() {
 		}
 		activeTokens[token] = true
 
-		// WebhookからチャンネルIDを抽出
-		parts := strings.Split(serverCfg.Discord.Webhook, "/")
-		if len(parts) >= 6 {
-			channelID := parts[len(parts)-2]
+		// チャンネルIDを直接使用
+		channelID := serverCfg.Discord.Channel
+		if channelID != "" {
 			newChannelToServer[channelID] = serverName
 		}
 	}
@@ -264,7 +263,7 @@ func handleAction(serverName string, config ConfigServer, action string) error {
 	// config.examples.jsonの構造からすると `serverName` とコンテナ名は必ずしも一致しないが、
 	// 一般的に管理上 `serverName` = `containerName` と仮定するか、検索する。
 	// 今回は `serverName` をコンテナ名として扱う(play-binの既存ロジックと合わせるなら要調整だが今回はこれで行く)
-	
+
 	// コンテナIDの特定
 	// Main.goのロジックを見ると、コンテナ名はDocker上の名前(`newyear_1.20.4`など)
 	// Configのキーは `newyear`。
@@ -273,7 +272,7 @@ func handleAction(serverName string, config ConfigServer, action string) error {
 	// しかし現状無いので、`serverName` = Docker Container Name と仮定して進める。
 	// *補足*: `config.example.json` の `workingDir` から推測も難しい。
 	// ユーザー要望に `action` とあるので、とりあえず `serverName` をコンテナ名として扱う。
-	
+
 	id := serverName // 仮定
 
 	switch action {
@@ -302,7 +301,7 @@ func handleAction(serverName string, config ConfigServer, action string) error {
 // MARK: sendCommandToContainer
 func sendCommandToContainer(containerName string, command string) error {
 	ctx := context.Background()
-	
+
 	// Attachしてstdinに書き込む
 	resp, err := cli.ContainerAttach(ctx, containerName, container.AttachOptions{
 		Stream: true,
