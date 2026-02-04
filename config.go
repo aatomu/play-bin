@@ -28,10 +28,16 @@ type ConfigUser struct {
 
 type ConfigServer struct {
 	WorkingDir string            `json:"workingDir"`
-	Mount      map[string]string `json:"mount"`
 	Image      string            `json:"image"`
+	Network    ConfigNetwork     `json:"network"`
+	Mount      map[string]string `json:"mount"`
 	Commands   ConfigCommands    `json:"commands"`
 	Discord    ConfigDiscord     `json:"discord"`
+}
+
+type ConfigNetwork struct {
+	Mode    string            `json:"mode"`
+	Mapping map[string]string `json:"mapping"`
 }
 
 type ConfigCommands struct {
@@ -53,6 +59,8 @@ type ConfigBackup struct {
 
 type ConfigDiscord struct {
 	Token      string `json:"token"`
+	Channel    string `json:"channel"`
+	AdminRole  string `json:"adminRole"`
 	Webhook    string `json:"webhook"`
 	LogSetting string `json:"logSetting"`
 }
@@ -81,18 +89,18 @@ func updateConfig(modTime time.Time) {
 
 	f, err := os.Open("./config.json")
 	if err != nil {
-		log.Printf("Config読み込み失敗: %v", err)
+		log.Printf("Config load failed: %v", err)
 		return
 	}
 	defer f.Close()
 
 	var newCfg Config
 	if err := json.NewDecoder(f).Decode(&newCfg); err != nil {
-		log.Printf("Configパース失敗: %v", err)
+		log.Printf("Config parse failed: %v", err)
 		return
 	}
 
 	lc.Config = newCfg
 	lc.lastLoaded = modTime
-	log.Println("Configを自動リロードしました")
+	log.Println("Config has reloaded")
 }
