@@ -3,13 +3,13 @@ module github.com/play-bin
 go 1.25.5
 
 require (
+	github.com/bwmarrin/discordgo v0.29.0
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/gorilla/websocket v1.5.3
 )
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/bwmarrin/discordgo v0.29.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/containerd/errdefs v1.0.0 // indirect
 	github.com/containerd/errdefs/pkg v0.3.0 // indirect
