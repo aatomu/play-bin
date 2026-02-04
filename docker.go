@@ -95,7 +95,7 @@ func handleTerminal() http.HandlerFunc {
 		}
 		defer stream.Close()
 
-		ws, err := upgrader.Upgrade(w, r, nil)
+		ws, err := wsUpgrader.Upgrade(w, r, nil)
 		if err != nil {
 			return
 		}
@@ -148,7 +148,7 @@ func handleTerminal() http.HandlerFunc {
 func handleStats() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
-		ws, _ := upgrader.Upgrade(w, r, nil)
+		ws, _ := wsUpgrader.Upgrade(w, r, nil)
 		defer ws.Close()
 
 		stats, err := cli.ContainerStats(context.Background(), id, true)

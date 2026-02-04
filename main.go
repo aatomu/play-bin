@@ -11,7 +11,7 @@ import (
 
 // MARK: var
 var (
-	upgrader = websocket.Upgrader{
+	wsUpgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
 
