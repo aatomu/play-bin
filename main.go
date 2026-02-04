@@ -7,7 +7,6 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/container"
 	"github.com/gorilla/websocket"
 )
 
@@ -15,8 +14,8 @@ import (
 var (
 	// Docker
 	dockerCli    *client.Client
-	containers   = make(map[string]Container)
-	containersMu sync.Mutex
+	attachLocks  = make(map[string]bool)
+	attachLockMu sync.Mutex
 
 	// Web client
 	webSessions  = make(map[string]string)
@@ -34,11 +33,6 @@ var (
 	// Other
 	config loadedConfig
 )
-
-type Container struct {
-	container.Container
-	attachLock sync.Mutex
-}
 
 // MARK: main()
 func main() {

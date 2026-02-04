@@ -42,15 +42,15 @@ func handleTerminal() http.HandlerFunc {
 
 		switch mode {
 		case "attach":
-			lockMutex.Lock()
+			attachLockMu.Lock()
 			if attachLocks[id] {
-				lockMutex.Unlock()
+				attachLockMu.Unlock()
 				http.Error(w, "Locked", 409)
 				return
 			}
 			attachLocks[id] = true
-			lockMutex.Unlock()
-			defer func() { lockMutex.Lock(); delete(attachLocks, id); lockMutex.Unlock() }()
+			attachLockMu.Unlock()
+			defer func() { attachLockMu.Lock(); delete(attachLocks, id); attachLockMu.Unlock() }()
 
 			resp, err := dockerCli.ContainerAttach(ctx, id, container.AttachOptions{
 				Stream: true, Stdin: true, Stdout: true, Stderr: true,
@@ -171,14 +171,18 @@ func handleContainerAction(action string) http.HandlerFunc {
 
 		switch action {
 		case "start":
-			startContainer(id)
+			// MARK: > Start
+			err = containerStart(id)
 		case "stop":
+			// MARK: > Stop
 			err = dockerCli.ContainerStop(r.Context(), id, container.StopOptions{})
 		case "backup":
-
+			// MARK: > Backup
 		case "restore":
+			// MARK: > Restore
 		case "kill":
-			err = dockerCli.ContainerKill(r.Context(), id, "")
+			// MARK: > Kill
+			err = containerKill(id)
 		}
 
 		if err != nil {

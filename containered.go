@@ -9,9 +9,9 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-// MARK: startContainer()
+// MARK: containerStart()
 // configからマウント、ネットワーク設定、起動コマンドを設定してコンテナを作成・起動
-func startContainer(id string) error {
+func containerStart(id string) error {
 	config := config.Get()
 	server, ok := config.Servers[id]
 	if !ok || server.Image == "" {
@@ -74,4 +74,21 @@ func startContainer(id string) error {
 	}
 
 	return dockerCli.ContainerStart(ctx, id, container.StartOptions{})
+}
+
+// MARK: containerKill()
+func containerKill(id string) error {
+	ctx := context.Background()
+
+	// MARK: > Stop
+	// 30secのタイムアウトでstopを試みる
+	timeout := 30
+	err := dockerCli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})
+	if err == nil {
+		return nil
+	}
+
+	// MARK: > Kill
+	// 強制終了
+	return dockerCli.ContainerKill(ctx, id, "SIGKILL")
 }
