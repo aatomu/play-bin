@@ -60,7 +60,6 @@ type ConfigBackup struct {
 type ConfigDiscord struct {
 	Token      string `json:"token"`
 	Channel    string `json:"channel"`
-	AdminRole  string `json:"adminRole"`
 	Webhook    string `json:"webhook"`
 	LogSetting string `json:"logSetting"`
 }
