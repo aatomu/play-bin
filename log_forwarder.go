@@ -60,7 +60,7 @@ func startLogForwarders() {
 
 // MARK: updateLogForwarders()
 func updateLogForwarders() {
-	cfg := getConfig()
+	cfg := config.Get()
 
 	activeServers := make(map[string]bool)
 
@@ -126,14 +126,14 @@ func tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookU
 		}
 
 		// コンテナの存在確認
-		_, err := cli.ContainerInspect(ctx, containerID)
+		_, err := dockerCli.ContainerInspect(ctx, containerID)
 		if err != nil {
 			// コンテナが存在しない場合は30秒待って再確認
 			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		reader, err := cli.ContainerLogs(ctx, containerID, options)
+		reader, err := dockerCli.ContainerLogs(ctx, containerID, options)
 		if err != nil {
 			log.Printf("Failed to tail logs for %s: %v (retrying in 10s)", serverName, err)
 			time.Sleep(10 * time.Second)

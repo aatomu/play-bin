@@ -5,31 +5,47 @@ import (
 	"net/http"
 	"sync"
 
+	"github.com/bwmarrin/discordgo"
 	"github.com/docker/docker/client"
+	"github.com/docker/docker/container"
 	"github.com/gorilla/websocket"
 )
 
 // MARK: var
 var (
+	// Docker
+	dockerCli    *client.Client
+	containers   = make(map[string]Container)
+	containersMu sync.Mutex
+
+	// Web client
+	webSessions  = make(map[string]string)
+	webSessionMu sync.RWMutex
+	// Websocket
 	wsUpgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool { return true },
 	}
 
-	cli         *client.Client
-	sessions    = make(map[string]string)
-	sessionLock sync.RWMutex
-	attachLocks = make(map[string]bool)
-	lockMutex   sync.Mutex
+	// Discord
+	discordSessions = make(map[string]*discordgo.Session) // token -> session
+	channelToServer = make(map[string]string)             // ChannelID -> ServerName
+	discordMu       sync.RWMutex
 
-	lc = &loadedConfig{}
+	// Other
+	config loadedConfig
 )
+
+type Container struct {
+	container.Container
+	attachLock sync.Mutex
+}
 
 // MARK: main()
 func main() {
 	var err error
 	// MARK: Docker client
 	log.Println("Docker client to be starting...")
-	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	dockerCli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
 		log.Fatalf("Docker client failed to start: %v", err)
 	}
@@ -58,7 +74,7 @@ func main() {
 	mux.HandleFunc("/ws/terminal", auth(handleTerminal()))
 	mux.HandleFunc("/ws/stats", auth(handleStats()))
 
-	listen := getConfig().Listen
+	listen := config.Get().Listen
 	log.Printf("Http server has started at \"%s\"", listen)
 	log.Fatal(http.ListenAndServe(listen, middleware(mux)))
 }

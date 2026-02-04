@@ -35,7 +35,7 @@ func handleTerminal() http.HandlerFunc {
 		var isTty bool
 
 		// コンテナのTTY設定を事前に確認
-		inspect, err := cli.ContainerInspect(ctx, id)
+		inspect, err := dockerCli.ContainerInspect(ctx, id)
 		if err == nil {
 			isTty = inspect.Config.Tty
 		}
@@ -52,7 +52,7 @@ func handleTerminal() http.HandlerFunc {
 			lockMutex.Unlock()
 			defer func() { lockMutex.Lock(); delete(attachLocks, id); lockMutex.Unlock() }()
 
-			resp, err := cli.ContainerAttach(ctx, id, container.AttachOptions{
+			resp, err := dockerCli.ContainerAttach(ctx, id, container.AttachOptions{
 				Stream: true, Stdin: true, Stdout: true, Stderr: true,
 			})
 			if err != nil {
@@ -65,11 +65,11 @@ func handleTerminal() http.HandlerFunc {
 				Tty: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
 				Env: []string{"TERM=xterm-256color"}, Cmd: []string{"/bin/sh"},
 			}
-			cExec, err := cli.ContainerExecCreate(ctx, id, cfg)
+			cExec, err := dockerCli.ContainerExecCreate(ctx, id, cfg)
 			if err != nil {
 				return
 			}
-			resp, err := cli.ContainerExecAttach(ctx, cExec.ID, container.ExecAttachOptions{Tty: true})
+			resp, err := dockerCli.ContainerExecAttach(ctx, cExec.ID, container.ExecAttachOptions{Tty: true})
 			if err != nil {
 				return
 			}
@@ -83,7 +83,7 @@ func handleTerminal() http.HandlerFunc {
 				Timestamps: false,
 				Tail:       "all", // 全文表示
 			}
-			logs, err := cli.ContainerLogs(ctx, id, logOptions)
+			logs, err := dockerCli.ContainerLogs(ctx, id, logOptions)
 			if err != nil {
 				http.Error(w, err.Error(), 500)
 				return
@@ -153,7 +153,7 @@ func handleStats() http.HandlerFunc {
 		ws, _ := wsUpgrader.Upgrade(w, r, nil)
 		defer ws.Close()
 
-		stats, err := cli.ContainerStats(context.Background(), id, true)
+		stats, err := dockerCli.ContainerStats(context.Background(), id, true)
 		if err != nil {
 			return
 		}
@@ -173,12 +173,12 @@ func handleContainerAction(action string) http.HandlerFunc {
 		case "start":
 			startContainer(id)
 		case "stop":
-			err = cli.ContainerStop(r.Context(), id, container.StopOptions{})
+			err = dockerCli.ContainerStop(r.Context(), id, container.StopOptions{})
 		case "backup":
 
 		case "restore":
 		case "kill":
-			err = cli.ContainerKill(r.Context(), id, "")
+			err = dockerCli.ContainerKill(r.Context(), id, "")
 		}
 
 		if err != nil {

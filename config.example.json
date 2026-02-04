@@ -40,7 +40,6 @@
       },
       "discord": {
         "channel": "",
-        "adminRole": "",
         "token": "",
         "webhook": "",
         "logSetting": ""

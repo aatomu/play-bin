@@ -20,7 +20,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ユーザー確認
-	cfg := getConfig()
+	cfg := config.Get()
 	user, ok := cfg.Users[creds.Username]
 	if !ok || user.Password != creds.Password {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -33,9 +33,9 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(tokenBytes)
 
 	// セッション保存 (ユーザーIDを紐付け)
-	sessionLock.Lock()
-	sessions[token] = creds.Username
-	sessionLock.Unlock()
+	webSessionMu.Lock()
+	webSessions[token] = creds.Username
+	webSessionMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
@@ -50,9 +50,9 @@ func auth(next http.HandlerFunc) http.HandlerFunc {
 			token = r.URL.Query().Get("token")
 		}
 
-		sessionLock.RLock()
-		username, ok := sessions[token]
-		sessionLock.RUnlock()
+		webSessionMu.RLock()
+		username, ok := webSessions[token]
+		webSessionMu.RUnlock()
 
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -62,7 +62,7 @@ func auth(next http.HandlerFunc) http.HandlerFunc {
 		// 権限チェック
 		containerID := r.URL.Query().Get("id")
 		if containerID != "" {
-			cfg := getConfig()
+			cfg := config.Get()
 			user, exists := cfg.Users[username]
 			if !exists {
 				http.Error(w, "Forbidden", http.StatusForbidden)
@@ -70,7 +70,7 @@ func auth(next http.HandlerFunc) http.HandlerFunc {
 			}
 
 			// Dockerからコンテナの実際の名前を取得
-			inspect, err := cli.ContainerInspect(r.Context(), containerID)
+			inspect, err := dockerCli.ContainerInspect(r.Context(), containerID)
 			if err != nil {
 				http.Error(w, "Container Not Found", http.StatusNotFound)
 				return

@@ -8,7 +8,7 @@ import (
 )
 
 func handleContainerList(w http.ResponseWriter, r *http.Request) {
-	containers, err := cli.ContainerList(r.Context(), container.ListOptions{All: true})
+	containers, err := dockerCli.ContainerList(r.Context(), container.ListOptions{All: true})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
@@ -19,11 +19,11 @@ func handleContainerList(w http.ResponseWriter, r *http.Request) {
 		token = r.URL.Query().Get("token")
 	}
 
-	sessionLock.RLock()
-	username := sessions[token]
-	sessionLock.RUnlock()
+	webSessionMu.RLock()
+	username := webSessions[token]
+	webSessionMu.RUnlock()
 
-	cfg := getConfig()
+	cfg := config.Get()
 	user := cfg.Users[username]
 
 	// フィルタリング
@@ -54,7 +54,7 @@ func handleContainerList(w http.ResponseWriter, r *http.Request) {
 
 func handleContainerInspect(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
-	inspect, err := cli.ContainerInspect(r.Context(), id)
+	inspect, err := dockerCli.ContainerInspect(r.Context(), id)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return

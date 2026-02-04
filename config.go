@@ -36,8 +36,8 @@ type ConfigServer struct {
 }
 
 type ConfigNetwork struct {
-	Mode    string            `json:"mode"`
-	Mapping map[string]string `json:"mapping"`
+	Mode    string            `json:"mode"`    // "host" or "bridge"
+	Mapping map[string]string `json:"mapping"` // use on "bridge" mode
 }
 
 type ConfigCommands struct {
@@ -64,27 +64,23 @@ type ConfigDiscord struct {
 	LogSetting string `json:"logSetting"`
 }
 
-func getConfig() Config {
-	lc.mu.RLock()
+func (c *loadedConfig) Get() Config {
+	c.mu.RLock()
 	info, err := os.Stat("./config.json")
 
-	if err == nil && info.ModTime().After(lc.lastLoaded) {
-		lc.mu.RUnlock()
-		updateConfig(info.ModTime())
-		lc.mu.RLock()
+	if err == nil && info.ModTime().After(c.lastLoaded) {
+		c.mu.RUnlock()
+		c.update()
+		c.mu.RLock()
 	}
-	defer lc.mu.RUnlock()
+	defer c.mu.RUnlock()
 
-	return lc.Config
+	return c.Config
 }
 
-func updateConfig(modTime time.Time) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-
-	if !modTime.After(lc.lastLoaded) {
-		return
-	}
+func (c *loadedConfig) update() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
 	f, err := os.Open("./config.json")
 	if err != nil {
@@ -99,7 +95,12 @@ func updateConfig(modTime time.Time) {
 		return
 	}
 
-	lc.Config = newCfg
-	lc.lastLoaded = modTime
+	c.Config = newCfg
+	info, err := f.Stat()
+	if err != nil {
+		log.Printf("Config stat failed: %v", err)
+		return
+	}
+	c.lastLoaded = info.ModTime()
 	log.Println("Config has reloaded")
 }

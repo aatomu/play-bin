@@ -5,19 +5,10 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/docker/docker/api/types/container"
-)
-
-// MARK: var
-// MARK: var
-var (
-	discordSessions = make(map[string]*discordgo.Session)
-	channelToServer = make(map[string]string) // ChannelID -> ServerName
-	discordMutex    sync.RWMutex
 )
 
 // MARK: startDiscordBots()
@@ -35,7 +26,7 @@ func startDiscordBots() {
 
 // MARK: updateBots()
 func updateBots() {
-	cfg := getConfig() // config.goのgetConfigはファイル更新を確認する
+	cfg := config.Get()
 
 	// 最新のチャンネルマッピング構築
 	newChannelToServer := make(map[string]string)
@@ -55,16 +46,16 @@ func updateBots() {
 		}
 	}
 
-	discordMutex.Lock()
+	discordMu.Lock()
 	channelToServer = newChannelToServer
 	log.Printf("Channel mapping updated: %v", channelToServer)
-	discordMutex.Unlock()
+	discordMu.Unlock()
 
 	// セッション管理 (新規追加・維持)
 	for token := range activeTokens {
-		discordMutex.RLock()
+		discordMu.RLock()
 		_, exists := discordSessions[token]
-		discordMutex.RUnlock()
+		discordMu.RUnlock()
 
 		if !exists {
 			dg, err := discordgo.New("Bot " + token)
@@ -83,15 +74,15 @@ func updateBots() {
 
 			registerCommands(dg)
 
-			discordMutex.Lock()
+			discordMu.Lock()
 			discordSessions[token] = dg
-			discordMutex.Unlock()
+			discordMu.Unlock()
 			log.Printf("Discord bot started for token ending in ...%s", token[len(token)-4:])
 		}
 	}
 
 	// 削除されたトークンのセッション終了
-	discordMutex.Lock()
+	discordMu.Lock()
 	for token, session := range discordSessions {
 		if !activeTokens[token] {
 			session.Close()
@@ -99,7 +90,7 @@ func updateBots() {
 			log.Printf("Discord bot stopped for token ending in ...%s", token[len(token)-4:])
 		}
 	}
-	discordMutex.Unlock()
+	discordMu.Unlock()
 }
 
 // MARK: registerCommands()
@@ -150,9 +141,9 @@ func registerCommands(s *discordgo.Session) {
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	channelID := i.ChannelID
 
-	discordMutex.RLock()
+	discordMu.RLock()
 	serverName, ok := channelToServer[channelID]
-	discordMutex.RUnlock()
+	discordMu.RUnlock()
 
 	if !ok {
 		// このチャンネルは管理対象外
@@ -166,8 +157,40 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	cfg := getConfig()
+	cfg := config.Get()
 	serverCfg := cfg.Servers[serverName]
+
+	// 操作権限チェック
+	discordUserID := ""
+	if i.Member != nil && i.Member.User != nil {
+		discordUserID = i.Member.User.ID
+	} else if i.User != nil {
+		discordUserID = i.User.ID
+	}
+
+	hasPermission := false
+	for _, user := range cfg.Users {
+		if user.Discord == discordUserID {
+			for _, pattern := range user.Controllable {
+				if pattern == "*" || pattern == serverName {
+					hasPermission = true
+					break
+				}
+			}
+			break
+		}
+	}
+
+	if !hasPermission {
+		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+			Type: discordgo.InteractionResponseChannelMessageWithSource,
+			Data: &discordgo.InteractionResponseData{
+				Content: "You don't have permission to control this server.",
+				Flags:   discordgo.MessageFlagsEphemeral,
+			},
+		})
+		return
+	}
 
 	switch i.ApplicationCommandData().Name {
 	case "action":
@@ -207,15 +230,15 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	discordMutex.RLock()
+	discordMu.RLock()
 	serverName, ok := channelToServer[m.ChannelID]
-	discordMutex.RUnlock()
+	discordMu.RUnlock()
 
 	if !ok {
 		return
 	}
 
-	cfg := getConfig()
+	cfg := config.Get()
 	serverCfg := cfg.Servers[serverName]
 	msgTemplate := serverCfg.Commands.Message
 
@@ -253,11 +276,11 @@ func handleAction(serverName string, config ConfigServer, action string) error {
 
 	switch action {
 	case "start":
-		return cli.ContainerStart(ctx, id, container.StartOptions{})
+		return dockerCli.ContainerStart(ctx, id, container.StartOptions{})
 	case "stop":
-		return cli.ContainerStop(ctx, id, container.StopOptions{})
+		return dockerCli.ContainerStop(ctx, id, container.StopOptions{})
 	case "kill":
-		return cli.ContainerKill(ctx, id, "SIGKILL")
+		return dockerCli.ContainerKill(ctx, id, "SIGKILL")
 	case "backup":
 		// Backup logic (Command execution)
 		for _, backupCmd := range config.Commands.Backup {
@@ -279,7 +302,7 @@ func sendCommandToContainer(containerName string, command string) error {
 	ctx := context.Background()
 
 	// Attachしてstdinに書き込む
-	resp, err := cli.ContainerAttach(ctx, containerName, container.AttachOptions{
+	resp, err := dockerCli.ContainerAttach(ctx, containerName, container.AttachOptions{
 		Stream: true,
 		Stdin:  true,
 	})
