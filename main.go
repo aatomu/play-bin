@@ -28,16 +28,23 @@ var (
 func main() {
 	var err error
 	// MARK: Docker client
+	log.Println("Docker client to be starting...")
 	cli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 	if err != nil {
-		log.Fatalf("Docker接続失敗: %v", err)
+		log.Fatalf("Docker client failed to start: %v", err)
 	}
+	log.Println("Docker client has started")
 
 	// MARK: Discord Bots
+	log.Println("Discord bots to be starting...")
 	go startDiscordBots()
+	log.Println("Discord bots has started")
+	log.Println("Log forwarders to be starting...")
 	go startLogForwarders()
+	log.Println("Log forwarders has started")
 
 	// MARK: Http server
+	log.Println("Http server to be starting...")
 	mux := http.NewServeMux()
 	// MARK: > File server
 	mux.Handle("/", http.FileServer(http.Dir("./")))
@@ -52,6 +59,6 @@ func main() {
 	mux.HandleFunc("/ws/stats", auth(handleStats()))
 
 	listen := getConfig().Listen
-	log.Printf("Console Server started at \"%s\"", listen)
+	log.Printf("Http server has started at \"%s\"", listen)
 	log.Fatal(http.ListenAndServe(listen, middleware(mux)))
 }
