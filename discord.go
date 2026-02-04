@@ -170,6 +170,30 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	cfg := getConfig()
 	serverCfg := cfg.Servers[serverName]
 
+	// AdminRoleチェック
+	adminRole := serverCfg.Discord.AdminRole
+	if adminRole != "" {
+		hasRole := false
+		if i.Member != nil {
+			for _, roleID := range i.Member.Roles {
+				if roleID == adminRole {
+					hasRole = true
+					break
+				}
+			}
+		}
+		if !hasRole {
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: &discordgo.InteractionResponseData{
+					Content: "You don't have permission to use this command.",
+					Flags:   discordgo.MessageFlagsEphemeral,
+				},
+			})
+			return
+		}
+	}
+
 	switch i.ApplicationCommandData().Name {
 	case "action":
 		action := i.ApplicationCommandData().Options[0].StringValue()
