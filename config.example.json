@@ -2,15 +2,27 @@
   "listen": ":1031",
   "users": {
     "admin": {
-      "password": "0000",
-      "controllable": ["sftp_server", "tunnel", "discord_voicevox", "netdata"]
+      "password": "****",
+      "controllable": [
+        "newyear_mc",
+        "sftp_server",
+        "tunnel",
+        "discord_voicevox",
+        "netdata"
+      ]
     }
   },
   "servers": {
-    "newyear": {
-      "workingDir": "/home/atomu/code/other/server/java/newyear_1.20.4",
-      "mount": {},
+    "newyear_mc": {
+      "workingDir": "/home/***/server/java/newyear_1.20.4",
       "image": "mc_java:21",
+      "mount": {
+        "/home/***/server/java/newyear_1.20.4": "/MC",
+        "/home/***/server/java/newyear_1.20.4.bak": "/backup"
+      },
+      "network": {
+        "mode": "host"
+      },
       "commands": {
         "start": "java -Xmx1G -Xms1G -jar server.jar",
         "stop": [

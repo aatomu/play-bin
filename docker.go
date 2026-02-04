@@ -25,6 +25,7 @@ func (n *ReadNullWriteCloser) Close() error {
 	return n.r.Close()
 }
 
+// MARK: handleTerminal()
 func handleTerminal() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -145,6 +146,7 @@ func handleTerminal() http.HandlerFunc {
 	}
 }
 
+// MARK: handleStats()
 func handleStats() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
@@ -161,6 +163,7 @@ func handleStats() http.HandlerFunc {
 	}
 }
 
+// MARK: handleContainerAction()
 func handleContainerAction(action string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
@@ -168,9 +171,14 @@ func handleContainerAction(action string) http.HandlerFunc {
 
 		switch action {
 		case "start":
-			err = cli.ContainerStart(r.Context(), id, container.StartOptions{})
+			startContainer(id)
 		case "stop":
 			err = cli.ContainerStop(r.Context(), id, container.StopOptions{})
+		case "backup":
+
+		case "restore":
+		case "kill":
+			err = cli.ContainerKill(r.Context(), id, "")
 		}
 
 		if err != nil {
