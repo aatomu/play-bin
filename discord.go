@@ -13,7 +13,7 @@ import (
 
 // MARK: startDiscordBots()
 func startDiscordBots() {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
 	// 初回実行
@@ -27,6 +27,12 @@ func startDiscordBots() {
 // MARK: updateBots()
 func updateBots() {
 	cfg := config.Get()
+
+	// 更新するか確認
+	if !channelUpdatedAt.Before(config.lastLoaded) {
+		return
+	}
+	channelUpdatedAt = config.lastLoaded
 
 	// 最新のチャンネルマッピング構築
 	newChannelToServer := make(map[string]string)
@@ -255,32 +261,13 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 
 // MARK: handleAction
 func handleAction(serverName string, config ConfigServer, action string) error {
-	ctx := context.Background()
-	// イメージ名からコンテナIDを探す (簡易実装: 名前が一致するもの、あるいはImageが一致するもの)
-	// ここではconfig.jsonにコンテナ名があればいいが、現状の実装だと動的にコンテナを探す必要がある
-	// 既存のAuthロジックではContainerInspectを使ってるが、サーバー名とコンテナ名の対応が必要。
-	// config.examples.jsonの構造からすると `serverName` とコンテナ名は必ずしも一致しないが、
-	// 一般的に管理上 `serverName` = `containerName` と仮定するか、検索する。
-	// 今回は `serverName` をコンテナ名として扱う(play-binの既存ロジックと合わせるなら要調整だが今回はこれで行く)
-
-	// コンテナIDの特定
-	// Main.goのロジックを見ると、コンテナ名はDocker上の名前(`newyear_1.20.4`など)
-	// Configのキーは `newyear`。
-	// ここでは `config.json` にコンテナ名(ID)の設定がないため迷うが、
-	// `ConfigServer` にDockerコンテナ名を含めるべきかもしれない。
-	// しかし現状無いので、`serverName` = Docker Container Name と仮定して進める。
-	// *補足*: `config.example.json` の `workingDir` から推測も難しい。
-	// ユーザー要望に `action` とあるので、とりあえず `serverName` をコンテナ名として扱う。
-
-	id := serverName // 仮定
-
 	switch action {
 	case "start":
-		return dockerCli.ContainerStart(ctx, id, container.StartOptions{})
+		return containerStart(serverName)
 	case "stop":
-		return dockerCli.ContainerStop(ctx, id, container.StopOptions{})
+		return containerStop(serverName)
 	case "kill":
-		return dockerCli.ContainerKill(ctx, id, "SIGKILL")
+		return containerKill(serverName)
 	case "backup":
 		// Backup logic (Command execution)
 		for _, backupCmd := range config.Commands.Backup {

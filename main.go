@@ -4,6 +4,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/docker/docker/client"
@@ -26,9 +27,10 @@ var (
 	}
 
 	// Discord
-	discordSessions = make(map[string]*discordgo.Session) // token -> session
-	channelToServer = make(map[string]string)             // ChannelID -> ServerName
-	discordMu       sync.RWMutex
+	discordSessions  = make(map[string]*discordgo.Session) // token -> session
+	channelToServer  = make(map[string]string)             // ChannelID -> ServerName
+	channelUpdatedAt time.Time                             // 最後に更新した時間
+	discordMu        sync.RWMutex
 
 	// Other
 	config loadedConfig
