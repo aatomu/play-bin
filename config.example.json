@@ -30,8 +30,12 @@
         },
         "stop": [
           {
-            "mode": "attach",
+            "type": "attach",
             "arg": "stop\n"
+          },
+          {
+            "type": "sleep",
+            "arg": "10s"
           }
         ],
         "backup": [

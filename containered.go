@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
@@ -41,8 +43,8 @@ func containerAction(id string, action ContainerAction) error {
 // MARK: containerStart()
 // configからマウント、ネットワーク設定、起動コマンドを設定してコンテナを作成・起動
 func containerStart(id string) error {
-	config := config.Get()
-	server, ok := config.Servers[id]
+	cfg := config.Get()
+	server, ok := cfg.Servers[id]
 	if !ok || server.Image == "" {
 		return nil
 	}
@@ -130,6 +132,33 @@ func containerStart(id string) error {
 // MARK: containerStop()
 func containerStop(id string) error {
 	ctx := context.Background()
+
+	cfg := config.Get()
+	server, ok := cfg.Servers[id]
+	if !ok || server.Image == "" {
+		return nil
+	}
+
+	for _, cmd := range server.Commands.Stop {
+		switch cmd.Type {
+		case "attach":
+			if err := sendCommandToContainer(id, cmd.Arg); err != nil {
+				log.Printf("Failed to send command to container %s: %v", id, err)
+			}
+		case "exec":
+			if err := sendExecToContainer(id, []string{"/bin/sh", "-c", cmd.Arg}); err != nil {
+				log.Printf("Failed to exec command in container %s: %v", id, err)
+			}
+		case "log":
+			log.Printf("[%s] %s", id, cmd.Arg)
+		case "sleep":
+			dur, err := time.ParseDuration(cmd.Arg)
+			if err != nil {
+				return err
+			}
+			time.Sleep(dur)
+		}
+	}
 
 	return dockerCli.ContainerStop(ctx, id, container.StopOptions{})
 }

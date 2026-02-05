@@ -52,7 +52,7 @@ type ConfigStart struct {
 	Arguments  string `json:"arguments,omitempty"`
 }
 type ConfigCmd struct {
-	Mode string `json:"mode"`
+	Type string `json:"type"`
 	Arg  string `json:"arg"`
 }
 
