@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"bufio"
@@ -31,15 +31,11 @@ func (lrw *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) 
 	return hijacker.Hijack()
 }
 
-func middleware(next http.Handler) http.Handler {
+func (s *Server) WithLogging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-
-		// ステータスコードのキャプチャ用ラッパー
 		lrw := &loggingResponseWriter{w, http.StatusOK}
-
 		next.ServeHTTP(lrw, r)
-
 		log.Printf("%s %s %s %d %v %s",
 			r.Method,
 			r.URL.Path,
@@ -52,11 +48,13 @@ func middleware(next http.Handler) http.Handler {
 }
 
 // MARK: Websocket()
-type wsBinaryWriter struct{ *websocket.Conn }
+type wsBinaryWriter struct {
+	*websocket.Conn
+}
 
 func (w *wsBinaryWriter) Write(p []byte) (int, error) {
 	if w.Conn == nil {
-		return 0, os.ErrInvalid // または適当なエラー
+		return 0, os.ErrInvalid
 	}
 	err := w.WriteMessage(websocket.BinaryMessage, p)
 	return len(p), err

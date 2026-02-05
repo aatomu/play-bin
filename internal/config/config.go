@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"encoding/json"
@@ -9,72 +9,76 @@ import (
 )
 
 // MARK: Config
-type loadedConfig struct {
+type LoadedConfig struct {
 	Config
-	lastLoaded time.Time
+	LastLoaded time.Time
 	mu         sync.RWMutex
 }
+
 type Config struct {
 	Listen  string                  `json:"listen"`
-	Users   map[string]ConfigUser   `json:"users"`
-	Servers map[string]ConfigServer `json:"servers"`
+	Users   map[string]UserConfig   `json:"users"`
+	Servers map[string]ServerConfig `json:"servers"`
 }
 
-type ConfigUser struct {
+type UserConfig struct {
 	Discord      string   `json:"discord"`
 	Password     string   `json:"password"`
 	Controllable []string `json:"controllable"`
 }
 
-type ConfigServer struct {
+type ServerConfig struct {
 	WorkingDir string            `json:"workingDir"`
 	Image      string            `json:"image"`
-	Network    ConfigNetwork     `json:"network"`
+	Network    NetworkConfig     `json:"network"`
 	Mount      map[string]string `json:"mount"`
-	Commands   ConfigCommands    `json:"commands"`
-	Discord    ConfigDiscord     `json:"discord"`
+	Commands   CommandsConfig    `json:"commands"`
+	Discord    DiscordConfig     `json:"discord"`
 }
 
-type ConfigNetwork struct {
+type NetworkConfig struct {
 	Mode    string            `json:"mode"`    // "host" or "bridge"
 	Mapping map[string]string `json:"mapping"` // use on "bridge" mode
 }
 
-type ConfigCommands struct {
-	Start   ConfigStart    `json:"start"`
-	Stop    []ConfigCmd    `json:"stop"`
-	Backup  []ConfigBackup `json:"backup"`
+type CommandsConfig struct {
+	Start   StartConfig    `json:"start"`
+	Stop    []CmdConfig    `json:"stop"`
+	Backup  []BackupConfig `json:"backup"`
 	Message string         `json:"message"`
 }
 
-type ConfigStart struct {
+type StartConfig struct {
 	Entrypoint string `json:"entrypoint,omitempty"`
 	Arguments  string `json:"arguments,omitempty"`
 }
-type ConfigCmd struct {
+
+type CmdConfig struct {
 	Type string `json:"type"`
 	Arg  string `json:"arg"`
 }
 
-type ConfigBackup struct {
+type BackupConfig struct {
 	Src  string `json:"src"`
 	Dest string `json:"dest"`
 }
 
-type ConfigDiscord struct {
+type DiscordConfig struct {
 	Token      string `json:"token"`
 	Channel    string `json:"channel"`
 	Webhook    string `json:"webhook"`
 	LogSetting string `json:"logSetting"`
 }
 
-func (c *loadedConfig) Get() Config {
+// MARK: Get()
+// 設定を取得。変更があれば自動で再読み込み
+func (c *LoadedConfig) Get() Config {
 	c.mu.RLock()
 	info, err := os.Stat("./config.json")
 
-	if err == nil && info.ModTime().After(c.lastLoaded) {
+	if err == nil && info.ModTime().After(c.LastLoaded) {
 		c.mu.RUnlock()
-		c.update()
+		c.Reload()
 		c.mu.RLock()
 	}
 	defer c.mu.RUnlock()
@@ -82,7 +86,9 @@ func (c *loadedConfig) Get() Config {
 	return c.Config
 }
 
-func (c *loadedConfig) update() {
+// MARK: Reload()
+// 設定ファイルを読み込む
+func (c *LoadedConfig) Reload() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -105,6 +111,6 @@ func (c *loadedConfig) update() {
 		log.Printf("Config stat failed: %v", err)
 		return
 	}
-	c.lastLoaded = info.ModTime()
+	c.LastLoaded = info.ModTime()
 	log.Println("Config has reloaded")
 }

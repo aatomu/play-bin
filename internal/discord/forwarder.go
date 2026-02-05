@@ -1,4 +1,4 @@
-package main
+package discord
 
 import (
 	"bufio"
@@ -13,7 +13,8 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
-	"github.com/docker/docker/api/types/container"
+	ctypes "github.com/docker/docker/api/types/container"
+	"github.com/play-bin/internal/docker"
 )
 
 // MARK: LogRule
@@ -22,7 +23,7 @@ type LogRule struct {
 	Regexp  []string       `json:"regexp"`
 	Type    string         `json:"type"`
 	Webhook WebhookMapping `json:"webhook"`
-	res     []*regexp.Regexp
+	Res     []*regexp.Regexp
 }
 
 type WebhookMapping struct {
@@ -31,37 +32,20 @@ type WebhookMapping struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
-// MARK: var
-var (
-	activeForwarders   = make(map[string]context.CancelFunc) // serverName -> cancel
-	forwarderMutex     sync.RWMutex
-	logRulesCache      = make(map[string]*logRulesState) // logSettingPath -> state
-	logRulesCacheMutex sync.RWMutex
-)
-
 type logRulesState struct {
 	rules      []LogRule
 	lastLoaded time.Time
 	mu         sync.RWMutex
 }
 
-// MARK: startLogForwarders()
-func startLogForwarders() {
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+var (
+	logRulesCache      = make(map[string]*logRulesState)
+	logRulesCacheMutex sync.RWMutex
+)
 
-	// 初回実行
-	updateLogForwarders()
-
-	for range ticker.C {
-		updateLogForwarders()
-	}
-}
-
-// MARK: updateLogForwarders()
-func updateLogForwarders() {
-	cfg := config.Get()
-
+// MARK: SyncLogForwarders()
+func (m *BotManager) SyncLogForwarders() {
+	cfg := m.Config.Get()
 	activeServers := make(map[string]bool)
 
 	for serverName, serverCfg := range cfg.Servers {
@@ -70,36 +54,33 @@ func updateLogForwarders() {
 		}
 		activeServers[serverName] = true
 
-		forwarderMutex.RLock()
-		_, exists := activeForwarders[serverName]
-		forwarderMutex.RUnlock()
+		m.ForwarderMu.RLock()
+		_, exists := m.ActiveForwarders[serverName]
+		m.ForwarderMu.RUnlock()
 
 		if !exists {
 			ctx, cancel := context.WithCancel(context.Background())
-			forwarderMutex.Lock()
-			activeForwarders[serverName] = cancel
-			forwarderMutex.Unlock()
+			m.ForwarderMu.Lock()
+			m.ActiveForwarders[serverName] = cancel
+			m.ForwarderMu.Unlock()
 
-			go tailContainerLogs(ctx, serverName, serverCfg.Discord.LogSetting, serverCfg.Discord.Webhook)
+			go m.tailContainerLogs(ctx, serverName, serverCfg.Discord.LogSetting, serverCfg.Discord.Webhook)
 			log.Printf("Log forwarder started for %s", serverName)
 		}
 	}
 
-	// 削除されたサーバーのForwarder停止
-	forwarderMutex.Lock()
-	for serverName, cancel := range activeForwarders {
+	m.ForwarderMu.Lock()
+	for serverName, cancel := range m.ActiveForwarders {
 		if !activeServers[serverName] {
 			cancel()
-			delete(activeForwarders, serverName)
+			delete(m.ActiveForwarders, serverName)
 			log.Printf("Log forwarder stopped for %s", serverName)
 		}
 	}
-	forwarderMutex.Unlock()
+	m.ForwarderMu.Unlock()
 }
 
-// MARK: tailContainerLogs
-func tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookURL string) {
-	// Webhook URLからIDとTokenを抽出
+func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookURL string) {
 	parts := strings.Split(webhookURL, "/")
 	if len(parts) < 7 {
 		log.Printf("Invalid webhook URL for log forwarding: %s", serverName)
@@ -108,16 +89,13 @@ func tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookU
 	webhookID := parts[len(parts)-2]
 	webhookToken := parts[len(parts)-1]
 
-	containerID := serverName
-
-	options := container.LogsOptions{
+	options := ctypes.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 		Tail:       "0",
 	}
 
-	// リトライ用ループ
 	for {
 		select {
 		case <-ctx.Done():
@@ -125,23 +103,20 @@ func tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookU
 		default:
 		}
 
-		// コンテナの存在確認
-		_, err := dockerCli.ContainerInspect(ctx, containerID)
+		_, err := docker.Client.ContainerInspect(ctx, serverName)
 		if err != nil {
-			// コンテナが存在しない場合は30秒待って再確認
 			time.Sleep(30 * time.Second)
 			continue
 		}
 
-		reader, err := dockerCli.ContainerLogs(ctx, containerID, options)
+		reader, err := docker.Client.ContainerLogs(ctx, serverName, options)
 		if err != nil {
-			log.Printf("Failed to tail logs for %s: %v (retrying in 10s)", serverName, err)
+			log.Printf("Failed to tail logs for %s: %v", serverName, err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
 
 		scanner := bufio.NewScanner(reader)
-
 		for scanner.Scan() {
 			select {
 			case <-ctx.Done():
@@ -151,42 +126,37 @@ func tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookU
 			}
 
 			line := scanner.Text()
-
-			// ルールをホットリロード対応で取得
 			rules := getLogRules(logSettingPath)
 			if rules == nil {
 				continue
 			}
 
 			for _, rule := range rules {
-				for _, re := range rule.res {
+				for _, re := range rule.Res {
 					if re.MatchString(line) {
 						matches := re.FindStringSubmatch(line)
 						content := rule.Webhook.Content
 						username := rule.Webhook.Username
 						avatarURL := rule.Webhook.AvatarURL
 
-						// $1, $2, ... を置換
 						for i, match := range matches {
-							placeholder := fmt.Sprintf("$%d", i)
-							content = strings.ReplaceAll(content, placeholder, match)
-							username = strings.ReplaceAll(username, placeholder, match)
-							avatarURL = strings.ReplaceAll(avatarURL, placeholder, match)
+							p := fmt.Sprintf("$%d", i)
+							content = strings.ReplaceAll(content, p, match)
+							username = strings.ReplaceAll(username, p, match)
+							avatarURL = strings.ReplaceAll(avatarURL, p, match)
 						}
 
-						executeWebhook(webhookID, webhookToken, username, content, avatarURL)
-						break // 最初にマッチしたら終了
+						m.executeWebhook(webhookID, webhookToken, username, content, avatarURL)
+						break
 					}
 				}
 			}
 		}
-
 		reader.Close()
 		time.Sleep(5 * time.Second)
 	}
 }
 
-// MARK: getLogRules
 func getLogRules(path string) []LogRule {
 	logRulesCacheMutex.RLock()
 	state, exists := logRulesCache[path]
@@ -199,7 +169,6 @@ func getLogRules(path string) []LogRule {
 		logRulesCacheMutex.Unlock()
 	}
 
-	// ファイル更新チェック
 	info, err := os.Stat(path)
 	if err != nil {
 		return nil
@@ -212,17 +181,15 @@ func getLogRules(path string) []LogRule {
 	if needsReload {
 		rules, err := loadLogRules(path)
 		if err != nil {
-			log.Printf("Failed to reload log rules from %s: %v", path, err)
+			log.Printf("Failed to reload log rules: %v", err)
 			state.mu.RLock()
 			defer state.mu.RUnlock()
 			return state.rules
 		}
-
 		state.mu.Lock()
 		state.rules = rules
 		state.lastLoaded = info.ModTime()
 		state.mu.Unlock()
-		log.Printf("Log rules reloaded from %s", path)
 	}
 
 	state.mu.RLock()
@@ -230,7 +197,6 @@ func getLogRules(path string) []LogRule {
 	return state.rules
 }
 
-// MARK: loadLogRules
 func loadLogRules(path string) ([]LogRule, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -243,32 +209,27 @@ func loadLogRules(path string) ([]LogRule, error) {
 		return nil, err
 	}
 
-	// コンパイル
 	for i := range rules {
-		for _, pattern := range rules[i].Regexp {
-			re, err := regexp.Compile(pattern)
+		for _, pat := range rules[i].Regexp {
+			re, err := regexp.Compile(pat)
 			if err != nil {
-				return nil, fmt.Errorf("invalid regex %s: %v", pattern, err)
+				return nil, err
 			}
-			rules[i].res = append(rules[i].res, re)
+			rules[i].Res = append(rules[i].Res, re)
 		}
 	}
-
 	return rules, nil
 }
 
-// MARK: executeWebhook
-func executeWebhook(webhookID, webhookToken, username, content, avatarURL string) {
-	session, _ := discordgo.New("")
-
-	params := &discordgo.WebhookParams{
+func (m *BotManager) executeWebhook(id, token, user, content, avatar string) {
+	dg, _ := discordgo.New("")
+	p := &discordgo.WebhookParams{
 		Content:   content,
-		Username:  username,
-		AvatarURL: avatarURL,
+		Username:  user,
+		AvatarURL: avatar,
 	}
-
-	_, err := session.WebhookExecute(webhookID, webhookToken, true, params)
+	_, err := dg.WebhookExecute(id, token, true, p)
 	if err != nil {
-		log.Printf("Failed to execute webhook: %v", err)
+		log.Printf("Webhook failed: %v", err)
 	}
 }

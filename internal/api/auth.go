@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"crypto/rand"
@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/play-bin/internal/docker"
 )
 
-// MARK: handleLogin()
-func handleLogin(w http.ResponseWriter, r *http.Request) {
+// MARK: Login()
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	var creds struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -19,63 +21,56 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// ユーザー確認
-	cfg := config.Get()
+	cfg := s.Config.Get()
 	user, ok := cfg.Users[creds.Username]
 	if !ok || user.Password != creds.Password {
 		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	// トークン生成
 	tokenBytes := make([]byte, 16)
 	rand.Read(tokenBytes)
 	token := hex.EncodeToString(tokenBytes)
 
-	// セッション保存 (ユーザーIDを紐付け)
-	webSessionMu.Lock()
-	webSessions[token] = creds.Username
-	webSessionMu.Unlock()
+	s.WebSessionMu.Lock()
+	s.WebSessions[token] = creds.Username
+	s.WebSessionMu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"token": token})
 }
 
-// MARK: auth()
-func auth(next http.HandlerFunc) http.HandlerFunc {
+// MARK: Auth()
+func (s *Server) Auth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// セッションチェック
 		token := r.Header.Get("Authorization")
 		if token == "" {
 			token = r.URL.Query().Get("token")
 		}
 
-		webSessionMu.RLock()
-		username, ok := webSessions[token]
-		webSessionMu.RUnlock()
+		s.WebSessionMu.RLock()
+		username, ok := s.WebSessions[token]
+		s.WebSessionMu.RUnlock()
 
 		if !ok {
 			http.Error(w, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 
-		// 権限チェック
 		containerID := r.URL.Query().Get("id")
 		if containerID != "" {
-			cfg := config.Get()
+			cfg := s.Config.Get()
 			user, exists := cfg.Users[username]
 			if !exists {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
 
-			// Dockerからコンテナの実際の名前を取得
-			inspect, err := dockerCli.ContainerInspect(r.Context(), containerID)
+			inspect, err := docker.Client.ContainerInspect(r.Context(), containerID)
 			if err != nil {
 				http.Error(w, "Container Not Found", http.StatusNotFound)
 				return
 			}
-			// 先頭の "/" を消す
 			realName := inspect.Name[1:]
 
 			allowed := false
