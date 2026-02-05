@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/docker/docker/api/types/container"
@@ -10,28 +11,16 @@ import (
 	"github.com/docker/go-connections/nat"
 )
 
-type ContainerAction int
+type ContainerAction string
 
 const (
-	ContainerActionStart ContainerAction = iota
-	ContainerActionStop
-	ContainerActionKill
-	ContainerActionBackup
-	ContainerActionRestore
+	ContainerActionStart   ContainerAction = "start"
+	ContainerActionStop    ContainerAction = "stop"
+	ContainerActionKill    ContainerAction = "kill"
+	ContainerActionBackup  ContainerAction = "backup"
+	ContainerActionRestore ContainerAction = "restore"
 )
 
-func (a ContainerAction) String() string {
-	switch a {
-	case ContainerActionStart:
-		return "start"
-	case ContainerActionStop:
-		return "stop"
-	case ContainerActionBackup:
-		return "backup"
-	default:
-		return "unknown"
-	}
-}
 func containerAction(id string, action ContainerAction) error {
 	switch action {
 	case ContainerActionStart:
@@ -45,7 +34,7 @@ func containerAction(id string, action ContainerAction) error {
 	case ContainerActionRestore:
 		return containerRestore(id)
 	default:
-		return nil
+		return fmt.Errorf("unknown action: %s", action)
 	}
 }
 

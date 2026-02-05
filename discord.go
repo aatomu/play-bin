@@ -11,6 +11,22 @@ import (
 	"github.com/docker/docker/api/types/container"
 )
 
+type embedType int
+
+const (
+	EmbedTypeError embedType = iota
+	EmbedTypeWarn
+	EmbedTypeSuccess
+	EmbedTypeInfo
+)
+
+const (
+	colorError   = 0xFF2929
+	colorWarn    = 0xFFC107
+	colorSuccess = 0x6EC207
+	colorInfo    = 0x00b0ff
+)
+
 // MARK: startDiscordBots()
 func startDiscordBots() {
 	ticker := time.NewTicker(5 * time.Second)
@@ -164,7 +180,6 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	}
 
 	cfg := config.Get()
-	serverCfg := cfg.Servers[serverName]
 
 	// 操作権限チェック
 	discordUserID := ""
@@ -201,31 +216,32 @@ func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.ApplicationCommandData().Name {
 	case "action":
 		action := i.ApplicationCommandData().Options[0].StringValue()
-		err := handleAction(serverName, serverCfg, action)
-		msg := fmt.Sprintf("Action `%s` executed for **%s**.", action, serverName)
+		err := containerAction(serverName, ContainerAction(action))
 		if err != nil {
-			msg = fmt.Sprintf("Error executing `%s`: %v", action, err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: interactionError(action, err),
+			})
+			return
 		}
 
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: msg,
-			},
+			Data: interactionSuccess(action, "Wait to be starting..."),
 		})
-
 	case "cmd":
 		cmdText := i.ApplicationCommandData().Options[0].StringValue()
 		err := sendCommandToContainer(serverName, cmdText)
-		msg := fmt.Sprintf("Command sent to **%s**.", serverName)
 		if err != nil {
-			msg = fmt.Sprintf("Error sending command: %v", err)
+			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+				Type: discordgo.InteractionResponseChannelMessageWithSource,
+				Data: interactionError("command", err),
+			})
+			return
 		}
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: msg,
-			},
+			Data: interactionSuccess("command", ""),
 		})
 	}
 }
@@ -259,31 +275,6 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	sendCommandToContainer(serverName, text+"\n")
 }
 
-// MARK: handleAction
-func handleAction(serverName string, config ConfigServer, action string) error {
-	switch action {
-	case "start":
-		return containerStart(serverName)
-	case "stop":
-		return containerStop(serverName)
-	case "kill":
-		return containerKill(serverName)
-	case "backup":
-		// Backup logic (Command execution)
-		for _, backupCmd := range config.Commands.Backup {
-			// 簡易的なバックアップコマンド実行 (cpなど)
-			// 実際にはホスト側の操作が必要だが、Docker内からDocker操作してるならMount経由で操作?
-			// ここではログだけ出す
-			log.Printf("Backup requested: %s -> %s", backupCmd.Src, backupCmd.Dest)
-		}
-		return nil
-	case "restore":
-		log.Printf("Restore requested for %s", serverName)
-		return nil
-	}
-	return fmt.Errorf("unknown action: %s", action)
-}
-
 // MARK: sendCommandToContainer
 func sendCommandToContainer(containerName string, command string) error {
 	ctx := context.Background()
@@ -301,3 +292,60 @@ func sendCommandToContainer(containerName string, command string) error {
 	_, err = resp.Conn.Write([]byte(command))
 	return err
 }
+
+func interactionError(action string, err error) *discordgo.InteractionResponseData {
+	return &discordgo.InteractionResponseData{
+		Embeds: []*discordgo.MessageEmbed{
+			&discordgo.MessageEmbed{
+				Color:       colorError,
+				Title:       fmt.Sprintf("Execution Error: %s", action),
+				Description: err.Error(),
+			},
+		},
+		Flags: discordgo.MessageFlagsEphemeral,
+	}
+}
+
+func interactionSuccess(action string, description string) *discordgo.InteractionResponseData {
+	return &discordgo.InteractionResponseData{
+		Embeds: []*discordgo.MessageEmbed{
+			&discordgo.MessageEmbed{
+				Color:       colorSuccess,
+				Title:       fmt.Sprintf("Execution Success: %s", action),
+				Description: description,
+			},
+		},
+	}
+}
+
+// func createEmbed(title string, description string, iconUrl string, color embedType) *discordgo.MessageEmbed {
+// 	var embedColor int
+// 	switch color {
+// 	case EmbedTypeError:
+// 		embedColor = colorError
+// 	case EmbedTypeWarn:
+// 		embedColor = colorWarn
+// 	case EmbedTypeSuccess:
+// 		embedColor = colorSuccess
+// 	case EmbedTypeInfo:
+// 		embedColor = colorInfo
+// 	}
+
+// 	if iconUrl == "" {
+// 		return &discordgo.MessageEmbed{
+// 			Title:       title,
+// 			Description: description,
+// 			Color:       embedColor,
+// 		}
+// 	} else {
+// 		return &discordgo.MessageEmbed{
+// 			Title:       title,
+// 			Description: description,
+// 			Color:       embedColor,
+// 			Author: &discordgo.MessageEmbedAuthor{
+// 				Name:    "PlayBin",
+// 				IconURL: iconUrl,
+// 			},
+// 		}
+// 	}
+// }

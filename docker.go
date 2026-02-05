@@ -169,22 +169,7 @@ func handleContainerAction(action string) http.HandlerFunc {
 		id := r.URL.Query().Get("id")
 		var err error
 
-		switch action {
-		case "start":
-			// MARK: > Start
-			err = containerStart(id)
-		case "stop":
-			// MARK: > Stop
-			err = dockerCli.ContainerStop(r.Context(), id, container.StopOptions{})
-		case "backup":
-			// MARK: > Backup
-		case "restore":
-			// MARK: > Restore
-		case "kill":
-			// MARK: > Kill
-			err = containerKill(id)
-		}
-
+		err = containerAction(id, ContainerAction(action))
 		if err != nil {
 			http.Error(w, err.Error(), 500)
 			return
