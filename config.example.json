@@ -1,32 +1,32 @@
 {
-  "listen": ":1031",
+  "listen": ":8080",
+  "sftp": {
+    "listen": ":2022"
+  },
   "users": {
     "admin": {
-      "password": "****",
-      "controllable": [
-        "newyear_mc",
-        "sftp_server",
-        "tunnel",
-        "discord_voicevox",
-        "netdata"
-      ]
+      "discord": "123456789012345678",
+      "password": "strongpassword",
+      "controllable": ["*"]
     }
   },
   "servers": {
-    "newyear_mc": {
-      "workingDir": "/home/***/server/java/newyear_1.20.4",
+    "minecraft-1": {
+      "workingDir": "/home/atomu/minecraft",
       "image": "mc_java:21",
-      "mount": {
-        "/home/***/server/java/newyear_1.20.4": "/MC",
-        "/home/***/server/java/newyear_1.20.4.bak": "/backup"
-      },
       "network": {
-        "mode": "host"
+        "mode": "bridge",
+        "mapping": {
+          "25565": "25565"
+        }
+      },
+      "mount": {
+        "/home/atomu/minecraft/data": "/MC"
       },
       "commands": {
         "start": {
-          "entrypoint": "",
-          "arguments": "-Xmx1G -Xms1G -jar server.jar"
+          "entrypoint": "java",
+          "arguments": "-Xms2G -Xmx2G -jar server.jar nogui"
         },
         "stop": [
           {
@@ -40,16 +40,17 @@
         ],
         "backup": [
           {
-            "src": "/MC",
-            "dest": "/backup"
+            "src": "/home/atomu/minecraft/data",
+            "dest": "/home/atomu/backups/minecraft-1"
           }
-        ]
+        ],
+        "message": "[Discord] ${user}: ${message}"
       },
       "discord": {
-        "channel": "",
-        "token": "",
-        "webhook": "",
-        "logSetting": ""
+        "token": "YOUR_BOT_TOKEN",
+        "channel": "123456789012345678",
+        "webhook": "https://discord.com/api/webhooks/...",
+        "logSetting": "./logs.json"
       }
     }
   }

@@ -19,6 +19,11 @@ type Config struct {
 	Listen  string                  `json:"listen"`
 	Users   map[string]UserConfig   `json:"users"`
 	Servers map[string]ServerConfig `json:"servers"`
+	SFTP    SFTPConfig              `json:"sftp"`
+}
+
+type SFTPConfig struct {
+	Listen string `json:"listen"` // e.g. ":2022"
 }
 
 type UserConfig struct {
