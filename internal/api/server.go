@@ -48,7 +48,11 @@ func (s *Server) Routes() http.Handler {
 }
 
 func (s *Server) Start() {
-	listen := s.Config.Get().Listen
+	listen := s.Config.Get().HTTPListen
+	if listen == "" {
+		log.Println("Http server is disabled (httpListen is empty)")
+		return
+	}
 	log.Printf("Http server has started at \"%s\"", listen)
 	log.Fatal(http.ListenAndServe(listen, s.Routes()))
 }

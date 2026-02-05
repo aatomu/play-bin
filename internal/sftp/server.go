@@ -62,8 +62,9 @@ func generateHostKey(path string) {
 
 // MARK: Start()
 func (s *Server) Start() {
-	listen := s.Config.Get().SFTP.Listen
+	listen := s.Config.Get().SFTPListen
 	if listen == "" {
+		log.Println("SFTP server is disabled (sftpListen is empty)")
 		return
 	}
 

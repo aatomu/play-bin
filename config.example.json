@@ -1,8 +1,6 @@
 {
-  "listen": ":8080",
-  "sftp": {
-    "listen": ":2022"
-  },
+  "httpListen": ":8080",
+  "sftpListen": ":2022",
   "users": {
     "admin": {
       "discord": "123456789012345678",
