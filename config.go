@@ -41,12 +41,16 @@ type ConfigNetwork struct {
 }
 
 type ConfigCommands struct {
-	Start   string         `json:"start"`
+	Start   ConfigStart    `json:"start"`
 	Stop    []ConfigCmd    `json:"stop"`
 	Backup  []ConfigBackup `json:"backup"`
 	Message string         `json:"message"`
 }
 
+type ConfigStart struct {
+	Entrypoint string `json:"entrypoint,omitempty"`
+	Arguments  string `json:"arguments,omitempty"`
+}
 type ConfigCmd struct {
 	Mode string `json:"mode"`
 	Arg  string `json:"arg"`

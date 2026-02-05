@@ -6,8 +6,48 @@ import (
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
+	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 )
+
+type ContainerAction int
+
+const (
+	ContainerActionStart ContainerAction = iota
+	ContainerActionStop
+	ContainerActionKill
+	ContainerActionBackup
+	ContainerActionRestore
+)
+
+func (a ContainerAction) String() string {
+	switch a {
+	case ContainerActionStart:
+		return "start"
+	case ContainerActionStop:
+		return "stop"
+	case ContainerActionBackup:
+		return "backup"
+	default:
+		return "unknown"
+	}
+}
+func containerAction(id string, action ContainerAction) error {
+	switch action {
+	case ContainerActionStart:
+		return containerStart(id)
+	case ContainerActionStop:
+		return containerStop(id)
+	case ContainerActionKill:
+		return containerKill(id)
+	case ContainerActionBackup:
+		return containerBackup(id)
+	case ContainerActionRestore:
+		return containerRestore(id)
+	default:
+		return nil
+	}
+}
 
 // MARK: containerStart()
 // configからマウント、ネットワーク設定、起動コマンドを設定してコンテナを作成・起動
@@ -28,8 +68,11 @@ func containerStart(id string) error {
 	}
 
 	// 起動コマンド設定
-	if server.Commands.Start != "" {
-		containerConfig.Cmd = strings.Fields(server.Commands.Start)
+	if server.Commands.Start.Entrypoint != "" {
+		containerConfig.Entrypoint = strings.Fields(server.Commands.Start.Entrypoint)
+	}
+	if server.Commands.Start.Arguments != "" {
+		containerConfig.Cmd = strings.Fields(server.Commands.Start.Arguments)
 	}
 
 	// MARK: > HostConfig
@@ -67,8 +110,27 @@ func containerStart(id string) error {
 		hostConfig.NetworkMode = "bridge"
 	}
 
+	// MARK: > Check Existing Container
+	// 既存のコンテナを確認し、停止中であれば削除する
+	inspect, err := dockerCli.ContainerInspect(ctx, id)
+	if err == nil {
+		if !inspect.State.Running {
+			// 停止中なら削除
+			removeOptions := container.RemoveOptions{
+				RemoveVolumes: false,
+				RemoveLinks:   false,
+				Force:         false,
+			}
+			if err := dockerCli.ContainerRemove(ctx, id, removeOptions); err != nil {
+				return err
+			}
+		}
+	} else if !client.IsErrNotFound(err) {
+		return err
+	}
+
 	// MARK: > Create and Start
-	_, err := dockerCli.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, id)
+	_, err = dockerCli.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, id)
 	if err != nil {
 		return err
 	}
@@ -76,11 +138,52 @@ func containerStart(id string) error {
 	return dockerCli.ContainerStart(ctx, id, container.StartOptions{})
 }
 
+// MARK: containerStop()
+func containerStop(id string) error {
+	ctx := context.Background()
+
+	return dockerCli.ContainerStop(ctx, id, container.StopOptions{})
+}
+
 // MARK: containerKill()
 func containerKill(id string) error {
 	ctx := context.Background()
 
 	// MARK: > Stop
+	// 30secのタイムアウトでstopを試みる
+	timeout := 30
+	err := dockerCli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})
+	if err == nil {
+		return nil
+	}
+
+	// MARK: > Kill
+	// 強制終了
+	return dockerCli.ContainerKill(ctx, id, "SIGKILL")
+}
+
+// MARK: containerBackup()
+func containerBackup(id string) error {
+	ctx := context.Background()
+
+	// MARK: > Backup
+	// 30secのタイムアウトでstopを試みる
+	timeout := 30
+	err := dockerCli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})
+	if err == nil {
+		return nil
+	}
+
+	// MARK: > Kill
+	// 強制終了
+	return dockerCli.ContainerKill(ctx, id, "SIGKILL")
+}
+
+// MARK: containerRestore()
+func containerRestore(id string) error {
+	ctx := context.Background()
+
+	// MARK: > Restore
 	// 30secのタイムアウトでstopを試みる
 	timeout := 30
 	err := dockerCli.ContainerStop(ctx, id, container.StopOptions{Timeout: &timeout})

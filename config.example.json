@@ -24,7 +24,10 @@
         "mode": "host"
       },
       "commands": {
-        "start": "java -Xmx1G -Xms1G -jar server.jar",
+        "start": {
+          "entrypoint": "",
+          "arguments": "-Xmx1G -Xms1G -jar server.jar"
+        },
         "stop": [
           {
             "mode": "attach",
