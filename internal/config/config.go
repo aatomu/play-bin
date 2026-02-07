@@ -43,10 +43,10 @@ type NetworkConfig struct {
 }
 
 type CommandsConfig struct {
-	Start   StartConfig    `json:"start"`
-	Stop    []CmdConfig    `json:"stop"`
-	Backup  []BackupConfig `json:"backup"`
-	Message string         `json:"message"`
+	Start   StartConfig `json:"start"`
+	Stop    []CmdConfig `json:"stop"`
+	Backup  []CmdConfig `json:"backup"`
+	Message string      `json:"message"`
 }
 
 type StartConfig struct {
@@ -57,11 +57,6 @@ type StartConfig struct {
 type CmdConfig struct {
 	Type string `json:"type"`
 	Arg  string `json:"arg"`
-}
-
-type BackupConfig struct {
-	Src  string `json:"src"`
-	Dest string `json:"dest"`
 }
 
 type DiscordConfig struct {

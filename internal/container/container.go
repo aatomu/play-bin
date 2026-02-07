@@ -186,41 +186,62 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 		return fmt.Errorf("server %s not found", id)
 	}
 
-	// 停止して整合性を確保
-	timeout := 30
-	_ = docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout})
-
 	timestamp := time.Now().Format("20060102_150405")
 	success := true
 
-	for _, b := range server.Commands.Backup {
-		destDir := b.Dest
-		currentDest := fmt.Sprintf("%s/%s", destDir, timestamp)
-		latestLink := fmt.Sprintf("%s/latest", destDir)
+	for _, cmd := range server.Commands.Backup {
+		switch cmd.Type {
+		case "attach":
+			// attachの場合は自動で改行を付与
+			if err := docker.SendCommand(id, cmd.Arg+"\n"); err != nil {
+				log.Printf("Failed to send command to container %s: %v", id, err)
+			}
+		case "sleep":
+			dur, err := time.ParseDuration(cmd.Arg)
+			if err != nil {
+				log.Printf("Invalid sleep duration %s: %v", cmd.Arg, err)
+				success = false
+				continue
+			}
+			time.Sleep(dur)
+		case "backup":
+			// Arg: "src:dest"
+			parts := strings.SplitN(cmd.Arg, ":", 2)
+			if len(parts) != 2 {
+				log.Printf("Invalid backup argument: %s (expected src:dest)", cmd.Arg)
+				success = false
+				continue
+			}
+			src := parts[0]
+			destDir := parts[1]
 
-		if err := os.MkdirAll(destDir, 0755); err != nil {
-			log.Printf("Failed to create backup dir %s: %v", destDir, err)
-			success = false
-			continue
-		}
+			currentDest := fmt.Sprintf("%s/%s", destDir, timestamp)
+			latestLink := fmt.Sprintf("%s/latest", destDir)
 
-		args := []string{"-av", "--delete"}
-		if _, err := os.Stat(latestLink); err == nil {
-			args = append(args, "--link-dest", latestLink)
-		}
-		args = append(args, b.Src+"/", currentDest)
+			if err := os.MkdirAll(destDir, 0755); err != nil {
+				log.Printf("Failed to create backup dir %s: %v", destDir, err)
+				success = false
+				continue
+			}
 
-		cmd := exec.CommandContext(ctx, "rsync", args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Backup failed for %s: %v\nOutput: %s", b.Src, err, string(output))
-			success = false
-			continue
-		}
+			args := []string{"-avh", "--delete"}
+			if _, err := os.Stat(latestLink); err == nil {
+				args = append(args, "--link-dest", latestLink)
+			}
+			args = append(args, src+"/", currentDest)
 
-		// latestリンクの更新
-		_ = os.Remove(latestLink)
-		if err := os.Symlink(timestamp, latestLink); err != nil {
-			log.Printf("Failed to update latest link for %s: %v", b.Dest, err)
+			runCmd := exec.CommandContext(ctx, "rsync", args...)
+			if output, err := runCmd.CombinedOutput(); err != nil {
+				log.Printf("Backup failed for %s: %v\nOutput: %s", src, err, string(output))
+				success = false
+				continue
+			}
+
+			// latestリンクの更新
+			_ = os.Remove(latestLink)
+			if err := os.Symlink(timestamp, latestLink); err != nil {
+				log.Printf("Failed to update latest link for %s: %v", destDir, err)
+			}
 		}
 	}
 
@@ -244,19 +265,32 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	_ = docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout})
 
 	success := true
-	for _, b := range server.Commands.Backup {
-		latestLink := fmt.Sprintf("%s/latest", b.Dest)
+	for _, cmd := range server.Commands.Backup {
+		if cmd.Type != "backup" {
+			continue
+		}
+
+		// Arg: "src:dest"
+		parts := strings.SplitN(cmd.Arg, ":", 2)
+		if len(parts) != 2 {
+			log.Printf("Invalid backup argument in restore: %s (expected src:dest)", cmd.Arg)
+			success = false
+			continue
+		}
+		src := parts[0]
+		destDir := parts[1]
+
+		latestLink := fmt.Sprintf("%s/latest", destDir)
 		if _, err := os.Stat(latestLink); err != nil {
-			log.Printf("Latest backup not found for %s", b.Src)
-			// success = false // 続行
+			log.Printf("Latest backup not found for %s", src)
 			continue
 		}
 
 		// rsyncで元に戻す
-		args := []string{"-av", "--delete", latestLink + "/", b.Src}
-		cmd := exec.CommandContext(ctx, "rsync", args...)
-		if output, err := cmd.CombinedOutput(); err != nil {
-			log.Printf("Restore failed for %s: %v\nOutput: %s", b.Src, err, string(output))
+		args := []string{"-avh", "--delete", latestLink + "/", src}
+		runCmd := exec.CommandContext(ctx, "rsync", args...)
+		if output, err := runCmd.CombinedOutput(); err != nil {
+			log.Printf("Restore failed for %s: %v\nOutput: %s", src, err, string(output))
 			success = false
 		}
 	}
