@@ -56,9 +56,14 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 			logger.Logf("Internal", "API", "Exec接続を開始しました: container=%s", id)
 
 		case "logs":
-			// コンテナの開始時からの全ログをストリームとして取得する。
+			// コンテナの開始時からのログを、指定された行数（tail）分取得してストリームを開始する。
+			// 初期表示や無限スクロール時の重複読み込みを防ぐためのパラメータ。
+			tail := q.Get("tail")
+			if tail == "" {
+				tail = "all"
+			}
 			logOptions := ctypes.LogsOptions{
-				ShowStdout: true, ShowStderr: true, Follow: true, Tail: "all",
+				ShowStdout: true, ShowStderr: true, Follow: true, Tail: tail,
 			}
 			logs, err := docker.Client.ContainerLogs(ctx, id, logOptions)
 			if err != nil {
@@ -68,7 +73,7 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 			}
 			// ログモードでは入力（stdin）を送る必要がないため、書き込みを無視するラッパーを使用する。
 			stream = &docker.ReadNullWriteCloser{R: logs}
-			logger.Logf("Internal", "API", "ログストリーミングを開始しました: container=%s", id)
+			logger.Logf("Internal", "API", "ログストリーミングを開始しました: container=%s, tail=%s", id, tail)
 		}
 
 		if stream != nil {

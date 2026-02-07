@@ -437,20 +437,79 @@
             // 接続かつ、操作モードである場合のみ送信を許可することで、誤送信によるエラーを防止する。
             if (isConnected && currentTermMode) {
                 input.disabled = false;
+                input.placeholder = currentTermMode === 'exec' ? 'Type commands...' : 'Command to stdin...';
                 btn.style.opacity = "1";
                 btn.style.pointerEvents = "auto";
             } else {
                 input.disabled = true;
+                input.value = "";
+                input.placeholder = "Select a container and mode";
                 btn.style.opacity = "0.5";
                 btn.style.pointerEvents = "none";
             }
         }
 
+        let logTailCount = 1000; // 初回およびスクロール追加時の読み込み行数
+        let isFetchingLogs = false; // 二重リクエスト防止
+
         // ターミナル実体（xterm.js）の初期化。UI読み込み時に一度だけ実行され、基本的な外観とアドオン（Fit）を設定する。
-        const term = new Terminal({ convertEol: true, cursorBlink: true, theme: { background: '#000' }, fontSize: 13 });
+        // 無限スクロールをサポートするため、scrollbackを十分に（10万行等）確保する。
+        const term = new Terminal({ 
+            convertEol: true, 
+            cursorBlink: true, 
+            theme: { background: '#000' }, 
+            fontSize: 13,
+            scrollback: 100000 
+        });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
+
+        // MARK: term.onScroll()
+        // ユーザーが一番上までスクロールした際、過去のログを非同期で取得してバッファの先頭に挿入する。
+        term.onScroll(async (newPos) => {
+            // スクロール位置が最上部であり、かつログモードで使用中、かつ取得中でない場合のみ実行。
+            if (newPos === 0 && currentTermMode === 'logs' && !isFetchingLogs) {
+                isFetchingLogs = true;
+                
+                // 2ページ分（ターミナルの高さの2倍）を目安に行数を算出。
+                const linesToFetch = term.rows * 2;
+                // 現在のバッファの総行数を取得（これより前のログが欲しい）
+                const currentBufferLength = term.buffer.active.length;
+                
+                try {
+                    // バックエンドから過去のログ（現在のバッファより多い行数）を取得し、差分を上に付け足す。
+                    // Docker APIの制約上「offset」の指定が難しいため、一括取得して既存分を読み飛ばすアプローチ。
+                    const nextTail = currentBufferLength + linesToFetch;
+                    const res = await fetch(`/api/container/logs?id=${selectedId}&tail=${nextTail}`, {
+                        headers: { 'Authorization': token }
+                    });
+                    if (!res.ok) throw new Error("Failed to fetch older logs");
+                    
+                    const text = await res.text();
+                    const allLines = text.split('\n');
+                    
+                    // 新しく取得したログのうち、まだ表示していない「古い」行のみを抽出。
+                    const newLines = allLines.slice(0, allLines.length - currentBufferLength);
+                    
+                    if (newLines.length > 0) {
+                        // 現在のスクロール位置を維持するため、一時的に描画をリセットして再構築する。
+                        // xterm.jsのバッファ先頭への直接挿入は困難なため、全体を書き直す。
+                        term.reset();
+                        term.write('\x1b[33m--- Historical Logs Loaded ---\x1b[0m\r\n');
+                        term.write(newLines.join('\r\n') + '\r\n');
+                        term.write(allLines.slice(allLines.length - currentBufferLength).join('\r\n'));
+                        
+                        // 読み込んだ分だけスクロール位置を調整し、ユーザーの視界が飛ばないようにする。
+                        term.scrollToLine(newLines.length);
+                    }
+                } catch (e) {
+                    console.error("Scroll load error:", e);
+                } finally {
+                    isFetchingLogs = false;
+                }
+            }
+        });
 
         // ブラウザのウィンドウサイズ変更を検知し、ターミナルの文字幅・行数が親要素に最適化されるよう再計算を依頼する。
         window.addEventListener('resize', () => { try { fitAddon.fit(); } catch (e) { } });
@@ -640,7 +699,8 @@
             document.getElementById('term-placeholder').style.display = 'none';
 
             // 接続試行。 token による認証をクエリパラメータ経由で付与。
-            wsTerm = new WebSocket(`ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}`);
+            // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
+            wsTerm = new WebSocket(`ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}&tail=${logTailCount}`);
             wsTerm.binaryType = 'arraybuffer';
 
             wsTerm.onopen = () => {

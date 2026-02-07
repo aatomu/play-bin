@@ -2,9 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 
 	ctypes "github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
 	"github.com/play-bin/internal/docker"
@@ -177,4 +179,44 @@ func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 	}
 	logger.Logf("Internal", "API", "コマンド送信成功: container=%s, cmd_len=%d", id, len(payload.Command))
 	w.WriteHeader(http.StatusOK)
+}
+
+// MARK: GetContainerLogs()
+// コンテナの過去ログを特定行数取得する。無限スクロール等の用途に使用。
+func (s *Server) GetContainerLogs(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	id := q.Get("id")
+	tail := q.Get("tail")
+	if tail == "" {
+		tail = "100" // デフォルトは直近100行とする
+	}
+
+	// 過去のログをスナップショットとして取得する。
+	// Follow: false にすることで、ストリーミングではなく現在のバッファのみを取得可能。
+	logOptions := ctypes.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     false,
+		Tail:       tail,
+	}
+
+	logs, err := docker.Client.ContainerLogs(r.Context(), id, logOptions)
+	if err != nil {
+		logger.Logf("Internal", "API", "過去ログの取得に失敗: container=%s, err=%v", id, err)
+		http.Error(w, "Failed to get logs", http.StatusInternalServerError)
+		return
+	}
+	defer logs.Close()
+
+	w.Header().Set("Content-Type", "text/plain")
+	// xterm.jsでそのまま扱えるよう、バイナリ（ANSIコード含む）をデマルチプレクスして出力する。
+	// TTYが有効な場合はそのままio.Copy可能だが、ログモードでは通常TTYなしとなるためStdCopyを使用。
+	inspect, err := docker.Client.ContainerInspect(r.Context(), id)
+	if err == nil && inspect.Config.Tty {
+		io.Copy(w, logs)
+	} else {
+		// ヘッダーを除去し、標準出力と標準エラーをマージしてクライアントへ返す。
+		// WriteCloserが必要なため、http.ResponseWriterをラップする。
+		stdcopy.StdCopy(w, w, logs)
+	}
 }

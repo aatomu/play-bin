@@ -51,6 +51,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/container/restore", s.Auth(s.Action("restore")))
 	mux.HandleFunc("/api/container/kill", s.Auth(s.Action("kill")))
 	mux.HandleFunc("/api/container/cmd", s.Auth(s.CmdContainer))
+	mux.HandleFunc("/api/container/logs", s.Auth(s.GetContainerLogs))
 
 	// MARK: > WebSocket API
 	// ターミナルの入力同期やリソース使用率のリアルタイム配信のためにWebSocketを利用する。
