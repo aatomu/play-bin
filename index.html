@@ -409,44 +409,63 @@
     </div>
 
     <script>
-        let token = "", selectedId = "", selectedName = "", wsTerm, wsStats, termDataListener;
+        // グローバル状態管理
+        let token = "";          // API認証用。ログイン成功時にサーバーから付録される
+        let selectedId = "";     // コンテナ操作の主体。Docker ID または設定ファイルのサーバー名が入る
+        let selectedName = "";   // UI表示用。ユーザーが認識しやすいコンテナ名
+        let wsTerm, wsStats;    // WebSocketコネクションを保持し、リアルタイム通信を管理する
+        let termDataListener;   // xterm.jsのイベントを購読し、解除可能にするための参照保持
 
+        // MARK: initTerminal()
+        // ターミナル(xterm.js)の初期化。UI読み込み時に一度だけ実行する。
         const term = new Terminal({ convertEol: true, cursorBlink: true, theme: { background: '#000' }, fontSize: 13 });
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
         term.open(document.getElementById('terminal'));
 
+        // ウィンドウの大きさが変わった際に、文字がはみ出さないようターミナルのグリッドを再計算させる
         window.addEventListener('resize', () => { try { fitAddon.fit(); } catch (e) { } });
 
-        // --- モーダル制御 (Attachにも対応) ---
+        // MARK: confirmAction()
+        // ユーザーがボタンを押した際、誤操作防止のための確認モーダルを表示する。
         function confirmAction(action) {
-            if (!selectedId) return;
+            // 対象が未選択の状態でアクションを起こさせない（安全ガード）
+            if (!selectedId && action !== 'attach') return; 
             const overlay = document.getElementById('modal-overlay');
             const confirmBtn = document.getElementById('modal-confirm-btn');
 
             document.getElementById('modal-title').innerText = `Container ${action.toUpperCase()}`;
 
             if (action === 'attach') {
-                document.getElementById('modal-body').innerText = `WARNING: Attaching to "${selectedName.replace('/', '')}" connects directly to the main process. If you send Ctrl+C, the container might stop. Continue?`;
+                // Attachはコンテナに直接信号を送るため、Ctrl+C等でコンテナが止まるリスクを警告する
+                document.getElementById('modal-body').innerText = `警告: "${selectedName}" に直結します。Ctrl+Cを送るとコンテナが停止する可能性があります。続行しますか？`;
                 confirmBtn.onclick = () => { connectTerminal('attach'); closeModal(); };
             } else {
-                document.getElementById('modal-body').innerText = `Are you sure you want to ${action} "${selectedName.replace('/', '')}"?`;
+                // 通常の起動・停止確認
+                document.getElementById('modal-body').innerText = `本当に "${selectedName}" に対して ${action} を実行しますか？`;
                 confirmBtn.onclick = () => { executeContainerAction(action); closeModal(); };
             }
 
             overlay.style.display = 'flex';
         }
 
+        // MARK: closeModal()
+        // 不要になったモーダルを画面から隠す。
         function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
 
+        // MARK: executeContainerAction()
+        // バックエンドのAPIに向けてコンテナ操作リクエストを送信する。
         async function executeContainerAction(action) {
             try {
                 const res = await fetch(`/api/container/${action}?id=${selectedId}`, { method: 'POST', headers: { 'Authorization': token } });
-                if (!res.ok) throw new Error(`${action} failed`);
+                if (!res.ok) throw new Error(`${action} に失敗しました`);
+                // サーバー側での状態変更（Dockerエンジンの遅延）を考慮し、少し待ってからUIを更新する
                 setTimeout(() => { fetchContainers(); loadInspectData(selectedId); }, 1000);
             } catch (e) { alert(e.message); }
         }
 
+        // MARK: doLogin()
+        // ユーザー識別とトークン取得のための認証リクエストを行う。
         async function doLogin() {
             const userEl = document.getElementById('user'), passEl = document.getElementById('password');
             try {
@@ -455,8 +474,9 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ username: userEl.value, password: passEl.value })
                 });
-                if (!res.ok) throw new Error("Login failed");
+                if (!res.ok) throw new Error("ログインに失敗しました");
                 token = (await res.json()).token;
+                // 認証成功後、アプリ画面に切り替えてコンテナ情報を読み込む
                 document.getElementById('login-screen').style.display = 'none';
                 document.getElementById('app').style.display = 'grid';
                 setTimeout(() => fitAddon.fit(), 100);
@@ -464,34 +484,50 @@
             } catch (e) { alert(e.message); }
         }
 
+        // MARK: fetchContainers()
+        // サイドバーに表示するコンテナの一覧をサーバーから最新化して取得する。
         async function fetchContainers() {
             try {
                 const res = await fetch('/api/containers', { headers: { 'Authorization': token } });
-                const data = await res.json();
-                const items = Array.isArray(data) ? data : (data.Items || []);
+                const items = await res.json();
+                // リストを構築し、ステータス（実行中かどうか）を色で表現する
                 document.getElementById('list-target').innerHTML = items.map(c => {
-                    const cName = (c.Names && c.Names[0]) ? c.Names[0].replace('/', '') : (c.Name || 'Unknown');
-                    return `<div class="container-item ${selectedId === c.Id ? 'active' : ''}" id="c-${c.Id}" onclick="selectContainer('${c.Id}', '${cName}')">
-                        <div class="dot ${c.State === 'running' ? 'running' : ''}"></div>${cName}</div>`;
+                    const cId = c.id || "";
+                    const cName = (c.names && c.names[0]) ? c.names[0].replace('/', '') : 'Unknown';
+                    const state = c.state || "";
+                    return `<div class="container-item ${selectedId === cId ? 'active' : ''}" id="c-${cId || cName}" onclick="selectContainer('${cId}', '${cName}')">
+                        <div class="dot ${state === 'running' ? 'running' : ''}"></div>${cName}</div>`;
                 }).join('');
             } catch (e) { console.error(e); }
         }
 
+        // MARK: selectContainer()
+        // ユーザーがサイドバーでコンテナを選んだ際の状態変更とUI反映。
         function selectContainer(id, name) {
+            // 同じものを再度クリックした場合は何もしない（負荷軽減）
             if (selectedId === id) return;
             selectedId = id; selectedName = name;
+            
+            // 視認性を高めるため、選ばれた要素を強調し、他を解除する
             document.querySelectorAll('.container-item').forEach(el => el.classList.remove('active'));
-            document.getElementById(`c-${id}`)?.classList.add('active');
+            const targetEl = document.getElementById(`c-${id}`) || document.getElementById(`c-${name}`);
+            if (targetEl) targetEl.classList.add('active');
+            
             document.getElementById('term-name').innerText = `Console: ${name}`;
+            // 別のコンテナに切り替わる際は、古い接続をクリーンアップする
             disconnectTerminal();
             loadInspectData(id);
         }
 
+        // MARK: toggleTermButtons()
+        // 接続状態に合わせてボタンの表示・非表示を制御する。
         function toggleTermButtons(connected) {
             document.getElementById('term-controls').style.display = connected ? 'none' : 'flex';
             document.getElementById('btn-disconnect').style.display = connected ? 'inline-block' : 'none';
         }
 
+        // MARK: disconnectTerminal()
+        // 現在のWebSocket通信を遮断し、ターミナルのリソースを解放する。
         function disconnectTerminal() {
             if (wsTerm) wsTerm.close();
             if (termDataListener) { termDataListener.dispose(); termDataListener = null; }
@@ -500,78 +536,114 @@
             toggleTermButtons(false);
         }
 
+        // MARK: loadInspectData()
+        // コンテナのメタ情報（ネットワーク設定やマウント情報）を取得し、パネルに表示する。
         async function loadInspectData(id) {
             try {
-                const res = await fetch(`/api/container/inspect?id=${id}`, { headers: { 'Authorization': token } });
-                const json = await res.json();
-                const info = json.Raw || json;
-                const isRunning = info.State?.Running;
-
-                document.getElementById('btn-start').style.display = isRunning ? 'none' : 'inline-block';
-                document.getElementById('btn-stop').style.display = isRunning ? 'inline-block' : 'none';
-                document.getElementById('control-divider').style.display = 'inline-block';
-                // 停止中はAttach/Exec/Logsは無効化（logsは過去分が見れる場合もあるが、基本非表示で実装）
-                document.getElementById('term-controls').style.opacity = isRunning ? '1' : '0.3';
-                document.getElementById('term-controls').style.pointerEvents = isRunning ? 'auto' : 'none';
-
-                document.getElementById('info-status').innerText = (info.State?.Status || "-").toUpperCase();
-                document.getElementById('info-pid').innerText = info.State?.Pid || "0";
-                const started = new Date(info.State?.StartedAt);
-                document.getElementById('info-started').innerText = isNaN(started) ? "-" : started.toLocaleString();
-                const uptime = isNaN(started) ? 0 : Math.floor((new Date() - started) / 1000 / 60);
-                document.getElementById('uptime-text').innerText = isRunning ? `${uptime} mins` : "Stopped";
-                document.getElementById('info-netmode').innerText = info.HostConfig?.NetworkMode || "default";
-                document.getElementById('info-restart').innerText = info.HostConfig?.RestartPolicy?.Name || "no";
-                document.getElementById('info-autoremove').innerText = info.HostConfig?.AutoRemove ? "Yes" : "No";
-
-                let p = ""; const pb = info.HostConfig?.PortBindings || {};
-                for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
-                document.getElementById('info-ports').innerHTML = p || "none";
-                document.getElementById('info-mounts').innerHTML = (info.Mounts || []).map(m =>
-                    `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`
-                ).join('') || "none";
-
-                if (isRunning) startStats(id);
-                else if (wsStats) wsStats.close();
+                // コンテナ実体が存在しない（missing）場合でもエラーにならないよう、名前での試行を含める
+                const res = await fetch(`/api/container/inspect?id=${id || selectedName}`, { headers: { 'Authorization': token } });
+                if (!res.ok) {
+                    // Docker側から取得できない場合は情報の更新のみ行う
+                    updateDetailUI(null);
+                    return;
+                }
+                const info = await res.json();
+                updateDetailUI(info.Raw || info);
             } catch (e) { }
         }
 
+        // MARK: updateDetailUI()
+        // バックエンドから得た詳細データをDOM要素に流し込む。
+        function updateDetailUI(info) {
+            const isRunning = info?.State?.Running;
+            const status = (info?.State?.Status || "MISSING").toUpperCase();
+
+            // 状態に応じたボタンの出現・消滅（例：停止中にはStopを出さない）を制御
+            document.getElementById('btn-start').style.display = isRunning ? 'none' : 'inline-block';
+            document.getElementById('btn-stop').style.display = isRunning ? 'inline-block' : 'none';
+            document.getElementById('control-divider').style.display = isRunning || info ? 'inline-block' : 'none';
+            
+            // コンテナが動いていない時はコンソール操作を行えないように視覚的にも抑制する
+            const controls = document.getElementById('term-controls');
+            controls.style.opacity = isRunning ? '1' : '0.3';
+            controls.style.pointerEvents = isRunning ? 'auto' : 'none';
+
+            // 主要な情報（ステータス、PID、起動時間）の書き換え
+            document.getElementById('info-status').innerText = status;
+            document.getElementById('info-pid').innerText = info?.State?.Pid || "-";
+            
+            const started = new Date(info?.State?.StartedAt);
+            document.getElementById('info-started').innerText = isNaN(started) ? "-" : started.toLocaleString();
+            const uptime = isNaN(started) ? 0 : Math.floor((new Date() - started) / 1000 / 60);
+            document.getElementById('uptime-text').innerText = isRunning ? `${uptime} mins` : (info ? "Stopped" : "Not Created");
+
+            // ネットワーク・インフラ構成情報の表示
+            document.getElementById('info-netmode').innerText = info?.HostConfig?.NetworkMode || "-";
+            document.getElementById('info-restart').innerText = info?.HostConfig?.RestartPolicy?.Name || "-";
+            document.getElementById('info-autoremove').innerText = info?.HostConfig?.AutoRemove ? "Yes" : "No";
+
+            // ポートマッピング情報。複数ある場合は改行して表示
+            let p = ""; const pb = info?.HostConfig?.PortBindings || {};
+            for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
+            document.getElementById('info-ports').innerHTML = p || "none";
+            
+            // ディレクトリマウント情報。データの永続化先を確認できるようにする
+            document.getElementById('info-mounts').innerHTML = (info?.Mounts || []).map(m =>
+                `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`
+            ).join('') || "none";
+
+            // 稼働中であればCPUやメモリの統計情報を購読開始し、停止していれば購読を解除する
+            if (isRunning) startStats(selectedId);
+            else if (wsStats) wsStats.close();
+        }
+
+        // MARK: connectTerminal()
+        // WebSocketを用いてサーバーと中継し、コンテナの入出力をターミナル画面に繋ぐ。
         function connectTerminal(mode) {
             if (!selectedId) return;
             disconnectTerminal();
             document.getElementById('term-placeholder').style.display = 'none';
 
-            // mode: attach, exec, logs
             wsTerm = new WebSocket(`ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}`);
             wsTerm.binaryType = 'arraybuffer';
 
             wsTerm.onopen = () => {
                 fitAddon.fit();
-                term.focus();
+                term.focus(); // 接続後すぐに操作できるようフォーカスを当てる
                 toggleTermButtons(true);
+                // ログ表示モードの場合は、ストリーミング開始をユーザーに明示する
                 if (mode === 'logs') term.write('\x1b[33m--- Tail Logs (Streaming) ---\x1b[0m\r\n');
             };
+            // サーバーから送られてきた出力をそのまま xterm.js に流し込む
             wsTerm.onmessage = (e) => term.write(new Uint8Array(e.data));
             wsTerm.onclose = () => toggleTermButtons(false);
             wsTerm.onerror = () => toggleTermButtons(false);
 
-            // logsモードの時は入力を送らないように制限可能
+            // ユーザーのキー入力をWebSocket越しにコンテナに転送する（ログモード以外）
             termDataListener = term.onData(data => {
                 if (wsTerm?.readyState === 1 && mode !== 'logs') wsTerm.send(data);
             });
         }
 
+        // MARK: startStats()
+        // コンテナの負荷状況（CPU・メモリ）のリアルタイム更新を開始する。
         function startStats(id) {
             if (wsStats) wsStats.close();
             wsStats = new WebSocket(`ws://${location.host}/ws/stats?id=${id}&token=${token}`);
             wsStats.onmessage = async (e) => {
                 try {
                     const s = JSON.parse((e.data instanceof Blob) ? await e.data.text() : e.data);
+                    
+                    // CPU使用率の算出（計算式はDocker APIの仕様に基づく）
                     const cpuDelta = (s.cpu_stats.cpu_usage.total_usage - s.precpu_stats.cpu_usage.total_usage);
                     const sysDelta = (s.cpu_stats.system_cpu_usage - s.precpu_stats.system_cpu_usage);
                     const cpu = sysDelta > 0 ? ((cpuDelta / sysDelta) * 100 * s.cpu_stats.online_cpus).toFixed(2) : 0;
+                    
+                    // 実メモリ使用量の算出
                     const memUsed = (s.memory_stats.usage / 1024 / 1024).toFixed(1);
                     const memPct = (s.memory_stats.usage / s.memory_stats.limit * 100).toFixed(1);
+                    
+                    // ゲージと数値の更新。100%を超える値にならないようキャップをかける
                     document.getElementById('cpu-text').innerText = `${cpu}%`;
                     document.getElementById('cpu-bar').style.width = `${Math.min(cpu, 100)}%`;
                     document.getElementById('mem-text').innerText = `${memUsed} MiB`;

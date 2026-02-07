@@ -2,19 +2,23 @@ package config
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/play-bin/internal/logger"
 )
 
-// MARK: Config
+// MARK: LoadedConfig
+// プログラム実行中に動的に変更可能な設定情報を管理するスレッドセーフなコンテナ。
 type LoadedConfig struct {
 	Config
 	LastLoaded time.Time
 	mu         sync.RWMutex
 }
 
+// MARK: Config
+// config.json の構造を反映したマッピング。
 type Config struct {
 	HTTPListen string                  `json:"httpListen,omitempty"`
 	SFTPListen string                  `json:"sftpListen,omitempty"`
@@ -39,7 +43,7 @@ type ServerConfig struct {
 
 type NetworkConfig struct {
 	Mode    string            `json:"mode"`    // "host" or "bridge"
-	Mapping map[string]string `json:"mapping"` // use on "bridge" mode
+	Mapping map[string]string `json:"mapping"` // bridge時のみ使用
 }
 
 type CommandsConfig struct {
@@ -67,12 +71,13 @@ type DiscordConfig struct {
 }
 
 // MARK: Get()
-// 設定を取得。変更があれば自動で再読み込み
+// 現在の設定情報を取得する。ファイルの最終更新時刻をチェックし、変更があれば自動リロードを行う。
 func (c *LoadedConfig) Get() Config {
 	c.mu.RLock()
 	info, err := os.Stat("./config.json")
 
 	if err == nil && info.ModTime().After(c.LastLoaded) {
+		// 共有ロックを解除してから書き込みロックを取得してリロードを実行
 		c.mu.RUnlock()
 		c.Reload()
 		c.mu.RLock()
@@ -83,30 +88,30 @@ func (c *LoadedConfig) Get() Config {
 }
 
 // MARK: Reload()
-// 設定ファイルを読み込む
+// ディスク上の config.json を読み込み、メモリ上のキャッシュを更新する。
 func (c *LoadedConfig) Reload() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	f, err := os.Open("./config.json")
 	if err != nil {
-		log.Printf("Config load failed: %v", err)
+		logger.Logf("Internal", "Config", "設定ファイルのオープンに失敗しました: %v", err)
 		return
 	}
 	defer f.Close()
 
 	var newCfg Config
 	if err := json.NewDecoder(f).Decode(&newCfg); err != nil {
-		log.Printf("Config parse failed: %v", err)
+		logger.Logf("Internal", "Config", "設定のパース（JSON）に失敗しました: %v", err)
 		return
 	}
 
 	c.Config = newCfg
 	info, err := f.Stat()
 	if err != nil {
-		log.Printf("Config stat failed: %v", err)
+		logger.Logf("Internal", "Config", "ファイル情報の取得に失敗しました: %v", err)
 		return
 	}
 	c.LastLoaded = info.ModTime()
-	log.Println("Config has reloaded")
+	logger.Log("Internal", "Config", "設定ファイルが再読み込みされました")
 }

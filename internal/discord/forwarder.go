@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"regexp"
 	"strings"
@@ -15,9 +14,11 @@ import (
 	"github.com/bwmarrin/discordgo"
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/play-bin/internal/docker"
+	"github.com/play-bin/internal/logger"
 )
 
 // MARK: LogRule
+// コンテナログから特定のパターンを検出し、Webhookへ転送するためのルール定義。
 type LogRule struct {
 	Comment string         `json:"comment"`
 	Regexp  []string       `json:"regexp"`
@@ -32,6 +33,7 @@ type WebhookMapping struct {
 	AvatarURL string `json:"avatar_url"`
 }
 
+// ログルールの読み込み状態を保持するキャッシュ構造体。
 type logRulesState struct {
 	rules      []LogRule
 	lastLoaded time.Time
@@ -44,11 +46,13 @@ var (
 )
 
 // MARK: SyncLogForwarders()
+// 設定ファイルの内容に合わせて、各コンテナのログ転送プロセスの起動・停止を同期する。
 func (m *BotManager) SyncLogForwarders() {
 	cfg := m.Config.Get()
 	activeServers := make(map[string]bool)
 
 	for serverName, serverCfg := range cfg.Servers {
+		// LogSetting または Webhook が空の場合は転送対象外
 		if serverCfg.Discord.LogSetting == "" || serverCfg.Discord.Webhook == "" {
 			continue
 		}
@@ -59,31 +63,36 @@ func (m *BotManager) SyncLogForwarders() {
 		m.ForwarderMu.RUnlock()
 
 		if !exists {
+			// 新しく転送を開始するコンテナに対してゴルーチンを起動
 			ctx, cancel := context.WithCancel(context.Background())
 			m.ForwarderMu.Lock()
 			m.ActiveForwarders[serverName] = cancel
 			m.ForwarderMu.Unlock()
 
 			go m.tailContainerLogs(ctx, serverName, serverCfg.Discord.LogSetting, serverCfg.Discord.Webhook)
-			log.Printf("Log forwarder started for %s", serverName)
+			logger.Logf("Internal", "Discord", "ログ転送を開始しました: %s", serverName)
 		}
 	}
 
+	// 転送対象外になったプロセスの停止
 	m.ForwarderMu.Lock()
 	for serverName, cancel := range m.ActiveForwarders {
 		if !activeServers[serverName] {
 			cancel()
 			delete(m.ActiveForwarders, serverName)
-			log.Printf("Log forwarder stopped for %s", serverName)
+			logger.Logf("Internal", "Discord", "ログ転送を停止しました: %s", serverName)
 		}
 	}
 	m.ForwarderMu.Unlock()
 }
 
+// MARK: tailContainerLogs()
+// Dockerコンテナのストリームログを監視し、ルールにマッチした行をDiscord Webhookに送信する。
 func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookURL string) {
+	// Webhook URL から ID とトークンを抽出
 	parts := strings.Split(webhookURL, "/")
 	if len(parts) < 7 {
-		log.Printf("Invalid webhook URL for log forwarding: %s", serverName)
+		logger.Logf("Internal", "Discord", "Webhook URLが不正です (%s): %s", serverName, webhookURL)
 		return
 	}
 	webhookID := parts[len(parts)-2]
@@ -103,15 +112,17 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 		default:
 		}
 
+		// コンテナが存在するかチェック。存在しない場合は待機する
 		_, err := docker.Client.ContainerInspect(ctx, serverName)
 		if err != nil {
 			time.Sleep(30 * time.Second)
 			continue
 		}
 
+		// ログストリームを取得
 		reader, err := docker.Client.ContainerLogs(ctx, serverName, options)
 		if err != nil {
-			log.Printf("Failed to tail logs for %s: %v", serverName, err)
+			logger.Logf("Internal", "Discord", "ログ取得失敗 (%s): %v", serverName, err)
 			time.Sleep(10 * time.Second)
 			continue
 		}
@@ -126,6 +137,7 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 			}
 
 			line := scanner.Text()
+			// 1行ごとに転送ルールに合致するかチェック
 			rules := getLogRules(logSettingPath)
 			if rules == nil {
 				continue
@@ -139,6 +151,7 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 						username := rule.Webhook.Username
 						avatarURL := rule.Webhook.AvatarURL
 
+						// 正規表現のキャプチャグループ（$1, $2...）を実内容で置換
 						for i, match := range matches {
 							p := fmt.Sprintf("$%d", i)
 							content = strings.ReplaceAll(content, p, match)
@@ -157,6 +170,8 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 	}
 }
 
+// MARK: getLogRules()
+// JSON形式のログ転送定義ファイルを読み込み、正規表現をコンパイルしてキャッシュする。
 func getLogRules(path string) []LogRule {
 	logRulesCacheMutex.RLock()
 	state, exists := logRulesCache[path]
@@ -175,13 +190,14 @@ func getLogRules(path string) []LogRule {
 	}
 
 	state.mu.RLock()
+	// ファイルの更新時刻をチェックし、変更があればリロードする
 	needsReload := info.ModTime().After(state.lastLoaded)
 	state.mu.RUnlock()
 
 	if needsReload {
 		rules, err := loadLogRules(path)
 		if err != nil {
-			log.Printf("Failed to reload log rules: %v", err)
+			logger.Logf("Internal", "Discord", "ログルールのパース失敗: %v", err)
 			state.mu.RLock()
 			defer state.mu.RUnlock()
 			return state.rules
@@ -197,6 +213,8 @@ func getLogRules(path string) []LogRule {
 	return state.rules
 }
 
+// MARK: loadLogRules()
+// ファイルからログ転送条件をデコードし、正規表現を事前コンパイルする。
 func loadLogRules(path string) ([]LogRule, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -221,6 +239,8 @@ func loadLogRules(path string) ([]LogRule, error) {
 	return rules, nil
 }
 
+// MARK: executeWebhook()
+// 生成されたメッセージを Discord Webhook 経由で送信する。
 func (m *BotManager) executeWebhook(id, token, user, content, avatar string) {
 	dg, _ := discordgo.New("")
 	p := &discordgo.WebhookParams{
@@ -230,6 +250,6 @@ func (m *BotManager) executeWebhook(id, token, user, content, avatar string) {
 	}
 	_, err := dg.WebhookExecute(id, token, true, p)
 	if err != nil {
-		log.Printf("Webhook failed: %v", err)
+		logger.Logf("External", "Discord", "Webhook送信失敗: %v", err)
 	}
 }

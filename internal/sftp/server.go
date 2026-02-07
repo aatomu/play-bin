@@ -3,7 +3,6 @@ package sftp
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -14,6 +13,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
+	"github.com/play-bin/internal/logger"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -24,6 +24,7 @@ type Server struct {
 }
 
 // MARK: NewServer()
+// SFTPサーバーの新しいインスタンスを生成し、SSH設定を初期化する。
 func NewServer(cfg *config.LoadedConfig, cm *container.Manager) *Server {
 	s := &Server{
 		Config:           cfg,
@@ -34,10 +35,10 @@ func NewServer(cfg *config.LoadedConfig, cm *container.Manager) *Server {
 		PasswordCallback: s.authenticate,
 	}
 
-	// ホストキーの準備
+	// ホストの同一性を証明するためのキーを準備。存在しない場合は自動生成する。
 	keyPath := "sftp_host_key"
 	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
-		log.Println("SFTP: Generating new host key...")
+		logger.Log("Internal", "SFTP", "新規ホストキーを生成しています...")
 		generateHostKey(keyPath)
 	}
 
@@ -46,36 +47,45 @@ func NewServer(cfg *config.LoadedConfig, cm *container.Manager) *Server {
 		private, err := ssh.ParsePrivateKey(keyBytes)
 		if err == nil {
 			sshConfig.AddHostKey(private)
+		} else {
+			logger.Logf("Internal", "SFTP", "ホストキーのパース失敗: %v", err)
 		}
+	} else {
+		logger.Logf("Internal", "SFTP", "ホストキーの読み込み失敗: %v", err)
 	}
 
 	s.sshConfig = sshConfig
 	return s
 }
 
+// MARK: generateHostKey()
+// SSH/SFTP接続に使用する暗号化キーを外部コマンドを用いて生成する。
 func generateHostKey(path string) {
 	cmd := exec.Command("ssh-keygen", "-f", path, "-N", "", "-t", "ed25519")
 	if err := cmd.Run(); err != nil {
-		log.Printf("SFTP: Failed to generate host key: %v", err)
+		logger.Logf("Internal", "SFTP", "ホストキーの生成に失敗しました: %v", err)
 	}
 }
 
 // MARK: Start()
+// 指定されたアドレスでTCPリスナーを開始し、SFTPのリクエスト待機を行う。
 func (s *Server) Start() {
 	listen := s.Config.Get().SFTPListen
 	if listen == "" {
-		log.Println("SFTP server is disabled (sftpListen is empty)")
+		// 設定が空の場合はセキュアな運用のためサーバーを無効化する
+		logger.Log("Internal", "SFTP", "SFTPサーバーは無効です（sftpListenが未設定）")
 		return
 	}
 
 	listener, err := net.Listen("tcp", listen)
 	if err != nil {
-		log.Printf("SFTP: Failed to listen on %s: %v", listen, err)
+		logger.Logf("Internal", "SFTP", "ポート %s のリスニング失敗: %v", listen, err)
 		return
 	}
-	log.Printf("SFTP server has started at \"%s\"", listen)
+	logger.Logf("Internal", "SFTP", "SFTPサーバーが開始されました: \"%s\"", listen)
 
 	for {
+		// 新しい接続を非同期（ゴルーチン）で処理することで、複数のユーザー同時アクセスに対応する
 		nConn, err := listener.Accept()
 		if err != nil {
 			continue
@@ -84,17 +94,25 @@ func (s *Server) Start() {
 	}
 }
 
+// MARK: authenticate()
+// SSH接続時のユーザー認証を行う。成功時にはユーザー情報をセッションに付与する。
 func (s *Server) authenticate(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
 	cfg := s.Config.Get()
 	user, ok := cfg.Users[c.User()]
 	if !ok || user.Password != string(pass) {
-		return nil, fmt.Errorf("auth failed")
+		logger.Logf("Client", "SFTP", "ログイン失敗: user=%s, addr=%s", c.User(), c.RemoteAddr())
+		return nil, fmt.Errorf("authentication failed")
 	}
+
+	logger.Logf("Client", "SFTP", "ログイン成功: user=%s, addr=%s", c.User(), c.RemoteAddr())
 	return &ssh.Permissions{
+		// 以降のファイル操作でユーザー名を特定するために情報を保持
 		Extensions: map[string]string{"user": c.User()},
 	}, nil
 }
 
+// MARK: handleConn()
+// 確立された通信経路に対して、SFTPサブシステムのハンドラを紐づける。
 func (s *Server) handleConn(nConn net.Conn) {
 	sConn, chans, reqs, err := ssh.NewServerConn(nConn, s.sshConfig)
 	if err != nil {
@@ -102,6 +120,7 @@ func (s *Server) handleConn(nConn net.Conn) {
 	}
 	defer sConn.Close()
 
+	// SSHのその他のリクエスト（シェル等）は無視し、SFTPのみを許可する
 	go ssh.DiscardRequests(reqs)
 
 	for newChannel := range chans {
@@ -118,6 +137,7 @@ func (s *Server) handleConn(nConn net.Conn) {
 		go func(in <-chan *ssh.Request) {
 			for req := range in {
 				ok := false
+				// SFTPサブシステムとしての要求のみを承諾する
 				if req.Type == "subsystem" && string(req.Payload[4:]) == "sftp" {
 					ok = true
 				}
@@ -125,13 +145,14 @@ func (s *Server) handleConn(nConn net.Conn) {
 			}
 		}(requests)
 
-		// 仮想ファイルシステム用ハンドラ
+		// 仮想ファイルシステム用ハンドラの初期化
 		username := sConn.Permissions.Extensions["user"]
 		rootHandler := &vfsHandler{
 			username: username,
 			config:   s.Config,
 		}
 
+		// ハンドラを登録し、SFTPとしての命令解釈（読み・書き・一覧表示など）を開始
 		server := sftp.NewRequestServer(channel, sftp.Handlers{
 			FileGet:  rootHandler,
 			FilePut:  rootHandler,
@@ -140,31 +161,37 @@ func (s *Server) handleConn(nConn net.Conn) {
 		})
 
 		if err := server.Serve(); err != nil && err != io.EOF {
-			log.Printf("SFTP: Server error: %v", err)
+			logger.Logf("Internal", "SFTP", "セッション異常終了 (user=%s): %v", username, err)
 		}
 	}
 }
 
 // MARK: vfsHandler
-// ユーザーの権限に基づいて、コンテナのマウントパスを仮想的にマッピングする
+// ユーザーの権限に基づき、ホスト上のパスを仮想ディレクトリ構造としてマッピングする構造体。
 type vfsHandler struct {
 	username string
 	config   *config.LoadedConfig
 }
 
+// MARK: mapPath()
+// ユーザーからの抽象的なパスを、ホスト上の実パスへ変換・権限検証する。
 func (h *vfsHandler) mapPath(path string) (string, error) {
 	path = filepath.Clean(path)
 	parts := strings.Split(strings.Trim(path, "/"), string(filepath.Separator))
 
+	// ルート（全コンテナ一覧）の要求
 	if len(parts) == 0 || (len(parts) == 1 && parts[0] == "") {
-		return "", fmt.Errorf("root") // Root level request
+		return "", logger.InternalError("SFTP", "root access")
 	}
 
 	containerName := parts[0]
 	cfg := h.config.Get()
-	user := cfg.Users[h.username]
+	user, userOk := cfg.Users[h.username]
+	if !userOk {
+		return "", os.ErrPermission
+	}
 
-	// 権限チェック
+	// 認可チェック: ユーザーがこのコンテナへの操作権限を持っているか
 	allowed := false
 	for _, p := range user.Controllable {
 		if p == "*" || p == containerName {
@@ -173,6 +200,7 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 		}
 	}
 	if !allowed {
+		logger.Logf("Client", "SFTP", "アクセス拒否: user=%s, path=%s", h.username, path)
 		return "", os.ErrPermission
 	}
 
@@ -181,25 +209,18 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 		return "", os.ErrNotExist
 	}
 
+	// コンテナのルート要求
 	if len(parts) == 1 {
-		return "", fmt.Errorf("container_root") // Container root level
+		return "", logger.InternalError("SFTP", "container_root access")
 	}
 
-	// マウントパスの解決
-	// 例: /container1/data/world -> host_path/world
-	// mounts のキーがホストパス、値がコンテナパス
-	// 仮想FS上では、便宜上 mounts の "ホストパスのベース名" をフォルダ名として見せるか、
-	// あるいは単にマウント設定をそのまま見せる。
-	// ここでは単純化のため、mounts の「キー（ホストパス）」の末尾ディレクトリ名を使う、
-	// または設定の順番に基づいた仮想名を使う。
-
-	// より実用的なのは、マウント設定の順番で "mount1", "mount2" とするのではなく、
-	// 「コンテナ内のパス」をキーにして見せること。
-	// mounts: { "/home/atomu/data": "/data" } -> SFTP: /container1/data/
+	// マウントされたディレクトリの解決
+	// 例: /server1/data/config.yml -> ホスト上の実パスへ変換
 	targetSubPath := parts[1]
 	for hostPath, containerPath := range server.Mount {
 		cPath := strings.Trim(containerPath, "/")
 		if cPath == targetSubPath {
+			// マウントポイント配下の相対パスを結合して実パスを生成
 			rel, _ := filepath.Rel(targetSubPath, strings.Join(parts[1:], "/"))
 			return filepath.Join(hostPath, rel), nil
 		}
@@ -208,12 +229,13 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 	return "", os.ErrNotExist
 }
 
-// Handlers interface implementations for vfsHandler
-
+// MARK: Filelist()
+// ディレクトリ内のファイル一覧を解決する。
 func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
-		if err.Error() == "root" {
+		// ルート階層では、ユーザーがアクセス可能なコンテナ名のリストを仮想的に生成する
+		if err.Error() == "[SFTP] root access" {
 			cfg := h.config.Get()
 			user := cfg.Users[h.username]
 			var items []os.FileInfo
@@ -231,7 +253,8 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			}
 			return &listerAt{items: items}, nil
 		}
-		if err.Error() == "container_root" {
+		// コンテナ直下では、マウントされているポイントを仮想ディレクトリとして返す
+		if err.Error() == "[SFTP] container_root access" {
 			containerName := strings.Trim(r.Filepath, "/")
 			cfg := h.config.Get()
 			server := cfg.Servers[containerName]
@@ -245,6 +268,7 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		return nil, err
 	}
 
+	// 実パス配下は通常のファイルシステムとして読み取る
 	files, err := os.ReadDir(fullPath)
 	if err != nil {
 		return nil, err
@@ -257,27 +281,40 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 	return &listerAt{items: items}, nil
 }
 
+// MARK: Fileread()
+// ファイルの読み込みリクエストを処理する。
 func (h *vfsHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
 		return nil, err
 	}
+	logger.Logf("Client", "SFTP", "ファイル読込: user=%s, path=%s", h.username, r.Filepath)
 	return os.Open(fullPath)
 }
 
+// MARK: Filewrite()
+// ファイルへの書き込みリクエストを処理する。
 func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
 		return nil, err
 	}
+	logger.Logf("Client", "SFTP", "ファイル書込: user=%s, path=%s", h.username, r.Filepath)
+	// 常に新規作成、または上書きとしてオープンする。
 	return os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 }
 
+// MARK: Filecmd()
+// ファイルの削除、改名、ディレクトリ作成等の各種操作を実行する。
 func (h *vfsHandler) Filecmd(r *sftp.Request) error {
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
 		return err
 	}
+
+	// 操作の種類に応じてログを出力
+	logger.Logf("Client", "SFTP", "操作実行 (%s): user=%s, path=%s", r.Method, h.username, r.Filepath)
+
 	switch r.Method {
 	case "Setstat":
 		return nil
@@ -294,16 +331,19 @@ func (h *vfsHandler) Filecmd(r *sftp.Request) error {
 	case "Remove":
 		return os.Remove(fullPath)
 	case "Symlink":
-		return fmt.Errorf("symlink not supported")
+		return logger.ClientError("SFTP", "シンボリックリンクはサポートされていません")
 	}
 	return nil
 }
 
-// ListerAt implementation
+// MARK: listerAt
+// sftp.ListerAt インターフェースを満たし、一覧のオフセット処理をサポートする構造体。
 type listerAt struct {
 	items []os.FileInfo
 }
 
+// MARK: ListAt()
+// 指定されたオフセットからファイル情報をコピーして返す。
 func (l *listerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
 	if offset >= int64(len(l.items)) {
 		return 0, io.EOF
@@ -315,7 +355,8 @@ func (l *listerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
 	return n, nil
 }
 
-// 仮想FileInfo
+// MARK: vfsFileInfo
+// 仮想ディレクトリ項目を os.FileInfo として見せるための擬似的な構造体。
 type vfsFileInfo struct {
 	name  string
 	isDir bool

@@ -24,6 +24,7 @@ type BotManager struct {
 }
 
 // MARK: NewBotManager()
+// Discord Botの管理を行うマネージャーを作成する。
 func NewBotManager(cfg *config.LoadedConfig, cm *container.Manager) *BotManager {
 	return &BotManager{
 		Config:           cfg,
@@ -35,11 +36,14 @@ func NewBotManager(cfg *config.LoadedConfig, cm *container.Manager) *BotManager 
 }
 
 // MARK: Start()
+// Botの同期プロセスとログ転送の管理プロセスを非同期で開始する。
 func (m *BotManager) Start() {
 	go m.runBotManager()
 	go m.runLogForwarderManager()
 }
 
+// MARK: runBotManager()
+// 一定間隔で設定をチェックし、Botの追加や削除（トークンの変更）を同期するループ。
 func (m *BotManager) runBotManager() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -50,6 +54,8 @@ func (m *BotManager) runBotManager() {
 	}
 }
 
+// MARK: runLogForwarderManager()
+// 一定間隔で設定をチェックし、ログ転送（Webhook）の有効・無効を同期するループ。
 func (m *BotManager) runLogForwarderManager() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

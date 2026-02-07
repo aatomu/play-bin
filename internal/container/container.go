@@ -3,7 +3,6 @@ package container
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/docker"
+	"github.com/play-bin/internal/logger"
 )
 
 type Action string
@@ -34,7 +34,9 @@ type Manager struct {
 }
 
 // MARK: ExecuteAction()
+// 指定されたアクション（起動、停止など）をコンテナに対して実行する。
 func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) error {
+	// アクションの種類に応じて呼び出し先を振り分ける
 	switch action {
 	case ActionStart:
 		return m.Start(ctx, id)
@@ -47,257 +49,230 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 	case ActionRestore:
 		return m.Restore(ctx, id)
 	default:
-		return fmt.Errorf("unknown action: %s", action)
+		return fmt.Errorf("未知のアクションです: %s", action)
 	}
 }
 
 // MARK: Start()
-// configからマウント、ネットワーク設定、起動コマンドを設定してコンテナを作成・起動
+// コンフィグ情報を元にコンテナを作成・起動する。
 func (m *Manager) Start(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok || server.Image == "" {
+		// 設定が存在しない、またはイメージ指定がない場合は起動できないため早期リターン
 		return nil
 	}
 
-	// MARK: > ContainerConfig
+	// コンテナの基本設定（TtyやOpenStdinを有効にすることでターミナル操作を可能にする）
 	containerConfig := &ctypes.Config{
 		Image:     server.Image,
 		Tty:       true,
 		OpenStdin: true,
 	}
 
-	// 起動コマンド設定
-	if server.Commands.Start.Entrypoint != "" {
-		containerConfig.Entrypoint = strings.Fields(server.Commands.Start.Entrypoint)
+	// 特定の起動コマンドが必要な場合（例：Javaのメモリオプション指定など）のみ設定を適用する
+	if e := server.Commands.Start.Entrypoint; e != "" {
+		containerConfig.Entrypoint = strings.Fields(e)
 	}
-	if server.Commands.Start.Arguments != "" {
-		containerConfig.Cmd = strings.Fields(server.Commands.Start.Arguments)
+	if a := server.Commands.Start.Arguments; a != "" {
+		containerConfig.Cmd = strings.Fields(a)
 	}
 
-	// MARK: > HostConfig
+	// ホスト側のリソース指定（マウント、ネットワーク）
 	hostConfig := &ctypes.HostConfig{}
 
-	// マウント設定
-	binds := []string{}
+	// 設定されたディレクトリをホストからコンテナにマウントする
 	for hostPath, containerPath := range server.Mount {
-		binds = append(binds, hostPath+":"+containerPath)
+		hostConfig.Binds = append(hostConfig.Binds, hostPath+":"+containerPath)
 	}
-	hostConfig.Binds = binds
 
-	// ネットワーク設定
-	switch server.Network.Mode {
-	case "host":
-		hostConfig.NetworkMode = "host"
-	case "bridge":
+	// ネットワーク接続モードの決定。未指定時はデフォルトの 'bridge' を使用。
+	hostConfig.NetworkMode = ctypes.NetworkMode(server.Network.Mode)
+	if hostConfig.NetworkMode == "" {
 		hostConfig.NetworkMode = "bridge"
-		// ポートマッピング
-		if len(server.Network.Mapping) > 0 {
-			portBindings := nat.PortMap{}
-			exposedPorts := nat.PortSet{}
-			for hostPort, containerPort := range server.Network.Mapping {
-				port := nat.Port(containerPort + "/tcp")
-				exposedPorts[port] = struct{}{}
-				portBindings[port] = []nat.PortBinding{
-					{HostIP: "0.0.0.0", HostPort: hostPort},
-				}
-			}
-			containerConfig.ExposedPorts = exposedPorts
-			hostConfig.PortBindings = portBindings
+	}
+
+	// ブリッジモードの場合のみ、外部からアクセス可能にするためのポートマッピングを設定する
+	if hostConfig.NetworkMode == "bridge" && len(server.Network.Mapping) > 0 {
+		portBindings := nat.PortMap{}
+		exposedPorts := nat.PortSet{}
+		for hostPort, containerPort := range server.Network.Mapping {
+			port := nat.Port(containerPort + "/tcp")
+			exposedPorts[port] = struct{}{}
+			portBindings[port] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: hostPort}}
 		}
-	default:
-		hostConfig.NetworkMode = "bridge"
+		containerConfig.ExposedPorts = exposedPorts
+		hostConfig.PortBindings = portBindings
 	}
 
-	// MARK: > Check Existing Container
-	inspect, err := docker.Client.ContainerInspect(ctx, id)
-	if err == nil {
+	// 冪等性を保つため、古いコンテナが残っている場合は一旦削除する処理。
+	// これによりコンフィグ変更を反映した新しいコンテナを作成できる。
+	if inspect, err := docker.Client.ContainerInspect(ctx, id); err == nil {
 		if !inspect.State.Running {
-			removeOptions := ctypes.RemoveOptions{
-				RemoveVolumes: false,
-				RemoveLinks:   false,
-				Force:         false,
-			}
-			if err := docker.Client.ContainerRemove(ctx, id, removeOptions); err != nil {
-				return err
-			}
+			// ボリュームなどは残さず、コンテナ自体のインスタンスのみをクリーンアップする
+			_ = docker.Client.ContainerRemove(ctx, id, ctypes.RemoveOptions{})
 		}
 	} else if !client.IsErrNotFound(err) {
+		logger.Error("Container", err)
 		return err
 	}
 
-	// MARK: > Create and Start
-	_, err = docker.Client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, id)
-	if err != nil {
+	// コンテナの生成。ここで設定したコンフィグが実際のDockerインスタンスに適用される。
+	if _, err := docker.Client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, id); err != nil {
+		logger.Logf("Internal", "Container", "コンテナ作成失敗(%s): %v", id, err)
 		return err
 	}
 
+	// 生成したコンテナを起動。
 	return docker.Client.ContainerStart(ctx, id, ctypes.StartOptions{})
 }
 
 // MARK: Stop()
+// カスタム停止ロジック（コマンド送信等）を実行した後にコンテナを停止する。
 func (m *Manager) Stop(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
-	if !ok || server.Image == "" {
-		return nil
+	if !ok {
+		// 設定がない場合は通常のDocker停止を試みる（外部作成コンテナへの対応）
+		return docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{})
 	}
 
+	// アプリケーションを安全に終了させるため、DockerのSIGTERM前にカスタムコマンド（例：/stopコマンドの送信）を実行する。
 	for _, cmd := range server.Commands.Stop {
 		switch cmd.Type {
 		case "attach":
 			if err := docker.SendCommand(id, cmd.Arg); err != nil {
-				log.Printf("Failed to send command to container %s: %v", id, err)
+				logger.Logf("Internal", "Container", "%s: attachコマンド送信失敗: %v", id, err)
 			}
 		case "exec":
 			if err := docker.SendExec(id, []string{"/bin/sh", "-c", cmd.Arg}); err != nil {
-				log.Printf("Failed to exec command in container %s: %v", id, err)
+				logger.Logf("Internal", "Container", "%s: exec実行失敗: %v", id, err)
 			}
 		case "log":
-			log.Printf("[%s] %s", id, cmd.Arg)
+			logger.Log("Internal", "Container", fmt.Sprintf("%s: %s", id, cmd.Arg))
 		case "sleep":
-			dur, err := time.ParseDuration(cmd.Arg)
-			if err != nil {
-				return err
+			// アプリのシャットダウンが完了するまでの待機時間を設ける。
+			if dur, err := time.ParseDuration(cmd.Arg); err == nil {
+				time.Sleep(dur)
 			}
-			time.Sleep(dur)
 		}
 	}
 
+	// 最後にDockerエンジンに対して明示的な停止命令を出す。
 	return docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{})
 }
 
 // MARK: Kill()
+// コンテナを強制停止する。
 func (m *Manager) Kill(ctx context.Context, id string) error {
 	timeout := 30
-	err := docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout})
-	if err == nil {
+	// まずは穏便に停止を試み、タイムアウトした場合は強制終了（SIGKILL）を試みる。
+	if err := docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout}); err == nil {
 		return nil
 	}
-
 	return docker.Client.ContainerKill(ctx, id, "SIGKILL")
 }
 
 // MARK: Backup()
+// 設定されたパスのバックアップを取得する。
 func (m *Manager) Backup(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok {
-		return fmt.Errorf("server %s not found", id)
+		return fmt.Errorf("サーバー %s が見つかりません", id)
 	}
 
 	timestamp := time.Now().Format("20060102_150405")
-	success := true
+	var hasError bool
 
+	// データ整合性を保つため、バックアップ前には必要に応じてコマンド送信や待機を繰り返す。
 	for _, cmd := range server.Commands.Backup {
 		switch cmd.Type {
 		case "attach":
-			// attachの場合は自動で改行を付与
 			if err := docker.SendCommand(id, cmd.Arg+"\n"); err != nil {
-				log.Printf("Failed to send command to container %s: %v", id, err)
+				logger.Logf("Internal", "Container", "%s: バックアップ準備コマンド送信失敗: %v", id, err)
 			}
 		case "sleep":
-			dur, err := time.ParseDuration(cmd.Arg)
-			if err != nil {
-				log.Printf("Invalid sleep duration %s: %v", cmd.Arg, err)
-				success = false
-				continue
+			if dur, err := time.ParseDuration(cmd.Arg); err == nil {
+				time.Sleep(dur)
 			}
-			time.Sleep(dur)
 		case "backup":
-			// Arg: "src:dest"
+			// rsyncのハードリンク機能を利用して、変更がないファイルはリンクに留めることでディスク容量を節約する。
 			parts := strings.SplitN(cmd.Arg, ":", 2)
 			if len(parts) != 2 {
-				log.Printf("Invalid backup argument: %s (expected src:dest)", cmd.Arg)
-				success = false
 				continue
 			}
-			src := parts[0]
-			destDir := parts[1]
+			src, destBase := parts[0], parts[1]
+			current := fmt.Sprintf("%s/%s", destBase, timestamp)
+			latest := fmt.Sprintf("%s/latest", destBase)
 
-			currentDest := fmt.Sprintf("%s/%s", destDir, timestamp)
-			latestLink := fmt.Sprintf("%s/latest", destDir)
-
-			if err := os.MkdirAll(destDir, 0755); err != nil {
-				log.Printf("Failed to create backup dir %s: %v", destDir, err)
-				success = false
-				continue
-			}
+			_ = os.MkdirAll(destBase, 0755)
 
 			args := []string{"-avh", "--delete"}
-			if _, err := os.Stat(latestLink); err == nil {
-				args = append(args, "--link-dest", latestLink)
+			if _, err := os.Stat(latest); err == nil {
+				// 前回バックアップがあれば、それとの差分のみを新規作成する
+				args = append(args, "--link-dest", latest)
 			}
-			args = append(args, src+"/", currentDest)
+			args = append(args, src+"/", current)
 
-			runCmd := exec.CommandContext(ctx, "rsync", args...)
-			if output, err := runCmd.CombinedOutput(); err != nil {
-				log.Printf("Backup failed for %s: %v\nOutput: %s", src, err, string(output))
-				success = false
+			if out, err := exec.CommandContext(ctx, "rsync", args...).CombinedOutput(); err != nil {
+				logger.Logf("Internal", "Container", "%s: rsync失敗: %v, output: %s", id, err, string(out))
+				hasError = true
 				continue
 			}
 
-			// latestリンクの更新
-			_ = os.Remove(latestLink)
-			if err := os.Symlink(timestamp, latestLink); err != nil {
-				log.Printf("Failed to update latest link for %s: %v", destDir, err)
-			}
+			// 最新版へのリンクを更新して次回のバックアップに備える。
+			_ = os.Remove(latest)
+			_ = os.Symlink(timestamp, latest)
 		}
 	}
 
-	if !success {
-		return fmt.Errorf("backup partially or fully failed")
+	if hasError {
+		return fmt.Errorf("バックアップ処理中にエラーが発生しました")
 	}
-
 	return nil
 }
 
 // MARK: Restore()
+// 保存された最新のバックアップからファイルを復元する。
 func (m *Manager) Restore(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok {
-		return fmt.Errorf("server %s not found", id)
+		return fmt.Errorf("サーバー %s が見つかりません", id)
 	}
 
-	// 実行中の場合は停止
+	// 復元中にデータが破損するのを防ぐため、必ずコンテナを停止した状態で実行する。
 	timeout := 30
 	_ = docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout})
 
-	success := true
+	var hasError bool
 	for _, cmd := range server.Commands.Backup {
 		if cmd.Type != "backup" {
 			continue
 		}
 
-		// Arg: "src:dest"
 		parts := strings.SplitN(cmd.Arg, ":", 2)
 		if len(parts) != 2 {
-			log.Printf("Invalid backup argument in restore: %s (expected src:dest)", cmd.Arg)
-			success = false
 			continue
 		}
-		src := parts[0]
-		destDir := parts[1]
+		src, destBase := parts[0], parts[1]
+		latest := fmt.Sprintf("%s/latest", destBase)
 
-		latestLink := fmt.Sprintf("%s/latest", destDir)
-		if _, err := os.Stat(latestLink); err != nil {
-			log.Printf("Latest backup not found for %s", src)
+		if _, err := os.Stat(latest); err != nil {
+			logger.Logf("Internal", "Container", "%s: 復元対象のバックアップが見つかりません: %s", id, latest)
 			continue
 		}
 
-		// rsyncで元に戻す
-		args := []string{"-avh", "--delete", latestLink + "/", src}
-		runCmd := exec.CommandContext(ctx, "rsync", args...)
-		if output, err := runCmd.CombinedOutput(); err != nil {
-			log.Printf("Restore failed for %s: %v\nOutput: %s", src, err, string(output))
-			success = false
+		// バックアップから書き戻す際も rsync を使用して差分のみを更新し、完了まで待機する。
+		if out, err := exec.CommandContext(ctx, "rsync", "-avh", "--delete", latest+"/", src).CombinedOutput(); err != nil {
+			logger.Logf("Internal", "Container", "%s: 復元失敗: %v, output: %s", id, err, string(out))
+			hasError = true
 		}
 	}
 
-	if !success {
-		return fmt.Errorf("restore partially or fully failed")
+	if hasError {
+		return fmt.Errorf("復元処理中にエラーが発生しました")
 	}
-
 	return nil
 }
