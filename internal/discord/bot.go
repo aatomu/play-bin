@@ -24,7 +24,7 @@ func (m *BotManager) SyncBots() {
 	cfg := m.Config.Get()
 
 	m.mu.RLock()
-	// 設定ファイルが最後に読み込まれた時刻をチェックし、更新が必要か判断する
+	// 設定ファイルが最後に読み込まれた時刻をチェックし、Bot構成の更新が必要か判断する。
 	needsUpdate := m.ChannelUpdatedAt.Before(m.Config.LastLoaded)
 	m.mu.RUnlock()
 
@@ -39,7 +39,7 @@ func (m *BotManager) SyncBots() {
 	newChannelToServer := make(map[string]string)
 	activeTokens := make(map[string]bool)
 
-	// 設定にある全サーバーからDiscord設定を抽出し、有効なトークンをリストアップする
+	// 設定にある各サーバーから、有効なDiscordトークンとチャンネルIDの紐付けを抽出する。
 	for serverName, serverCfg := range cfg.Servers {
 		token := serverCfg.Discord.Token
 		if token == "" {
@@ -55,7 +55,7 @@ func (m *BotManager) SyncBots() {
 	m.ChannelToServer = newChannelToServer
 	m.mu.Unlock()
 
-	// 新しく追加されたトークンに対して Bot セッションを開始する
+	// 新たに追加されたトークンに対して、個別の Bot セッションを立ち上げる。
 	for token := range activeTokens {
 		m.mu.RLock()
 		_, exists := m.Sessions[token]
@@ -64,6 +64,7 @@ func (m *BotManager) SyncBots() {
 		if !exists {
 			dg, err := discordgo.New("Bot " + token)
 			if err != nil {
+				// トークン不正等の外部要因（External）として記録。
 				logger.Logf("External", "Discord", "セッション作成失敗: %v", err)
 				continue
 			}
@@ -72,10 +73,12 @@ func (m *BotManager) SyncBots() {
 			dg.AddHandler(m.onMessageCreate)
 
 			if err := dg.Open(); err != nil {
+				// Discord APIへの接続失敗（External）として記録。
 				logger.Logf("External", "Discord", "接続オープン失敗: %v", err)
 				continue
 			}
 
+			// スラッシュコマンドを Discord 側へデプロイする。
 			m.registerCommands(dg)
 
 			m.mu.Lock()
@@ -85,7 +88,7 @@ func (m *BotManager) SyncBots() {
 		}
 	}
 
-	// 設定から削除されたトークンのセッションをクローズしてクリーンアップする
+	// 設定から除去されたトークンに対応する、古くなった Bot セッションを破棄する。
 	m.mu.Lock()
 	for token, session := range m.Sessions {
 		if !activeTokens[token] {
@@ -98,7 +101,7 @@ func (m *BotManager) SyncBots() {
 }
 
 // MARK: registerCommands()
-// スラッシュコマンド（/action, /cmd）をDiscord側に登録する。
+// スラッシュコマンド（/action, /cmd）の中身を定義し、Discord APIを通じて登録する。
 func (m *BotManager) registerCommands(dg *discordgo.Session) {
 	commands := []*discordgo.ApplicationCommand{
 		{
@@ -137,19 +140,19 @@ func (m *BotManager) registerCommands(dg *discordgo.Session) {
 	for _, cmd := range commands {
 		_, err := dg.ApplicationCommandCreate(dg.State.User.ID, "", cmd)
 		if err != nil {
-			logger.Logf("External", "Discord", "コマンド登録失敗 (%s): %v", cmd.Name, err)
+			logger.Logf("External", "Discord", "コマンド登録失敗 (%s, session=%s): %v", cmd.Name, dg.State.User.ID, err)
 		}
 	}
 }
 
 // MARK: onInteractionCreate()
-// スラッシュコマンドが実行された際のコールバック処理。権限確認とアクション実行を行う。
+// スラッシュコマンド実行時のトリガー。ユーザー権限を検証し、許可された場合のみマネージャー経由で処理を叩く。
 func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.InteractionCreate) {
 	m.mu.RLock()
 	serverName, ok := m.ChannelToServer[i.ChannelID]
 	m.mu.RUnlock()
 
-	// チャンネルがどのサーバーにも紐付いていない場合は応答して終了
+	// 呼び出し元のチャンネルが特定の管理対象コンテナに割り当てられていない場合は無視する。
 	if !ok {
 		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -169,7 +172,7 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 		userID = i.User.ID
 	}
 
-	// 実行者が対象コンテナの操作権限を持っているか検証
+	// ユーザー情報と controllable リストを照合し、権限のない操作をブロックする。
 	allowed := false
 	for _, user := range cfg.Users {
 		if user.Discord == userID {
@@ -184,6 +187,7 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 	}
 
 	if !allowed {
+		// 権限のない操作試行は、クライアント起因の不正アクセス（Client）として記録する。
 		logger.Logf("Client", "Discord", "不正アクセス試行: user=%s, target=%s", userID, serverName)
 		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
@@ -195,7 +199,7 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 		return
 	}
 
-	// 処理に時間がかかる可能性があるため、一旦「考え中...」の状態にする
+	// 長時間の処理（バックアップ等）に備え、一旦レスポンスを保留（Deferred）にする。
 	err := dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 	})
@@ -235,9 +239,9 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 }
 
 // MARK: onMessageCreate()
-// チャンネルにメッセージが投稿された際、自動返信テンプレートに基づいてコンテナに入力する。
+// 連携チャンネルへの投稿内容を、特定のテンプレートに従ってコンテナの stdin へ自動送信する。
 func (m *BotManager) onMessageCreate(dg *discordgo.Session, msg *discordgo.MessageCreate) {
-	// 自身のメッセージやBotのメッセージには反応しない（無限ループ防止）
+	// Bot自身や他のBotの投稿を無視し、意図しないコマンド連鎖を回避する。
 	if msg.Author.Bot || msg.Author.ID == dg.State.User.ID {
 		return
 	}
@@ -254,17 +258,18 @@ func (m *BotManager) onMessageCreate(dg *discordgo.Session, msg *discordgo.Messa
 	serverCfg := cfg.Servers[serverName]
 	template := serverCfg.Commands.Message
 	if template == "" {
+		// メッセージ自動送信が設定されていないサーバーの場合は終了。
 		return
 	}
 
-	// テンプレート変数を実際のユーザー名と内容で置換し、コンテナの標準入力へ流し込む
+	// 投稿者名と本文を埋め込み、コンテナ側のチャット欄等へ反映させる。
 	text := strings.ReplaceAll(template, "${user}", msg.Author.Username)
 	text = strings.ReplaceAll(text, "${message}", msg.Content)
 	docker.SendCommand(serverName, text+"\n")
 }
 
 // MARK: interactionErrorEmbed()
-// 失敗時の埋め込みメッセージを生成する。
+// ユーザーへのエラー通知用リッチメッセージを生成する。
 func (m *BotManager) interactionErrorEmbed(act string, err error) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Color:       colorError,
@@ -274,7 +279,7 @@ func (m *BotManager) interactionErrorEmbed(act string, err error) *discordgo.Mes
 }
 
 // MARK: interactionSuccessEmbed()
-// 成功時の埋め込みメッセージを生成する。
+// ユーザーへの正常完了通知用リッチメッセージを生成する。
 func (m *BotManager) interactionSuccessEmbed(act string, desc string) *discordgo.MessageEmbed {
 	return &discordgo.MessageEmbed{
 		Color:       colorSuccess,

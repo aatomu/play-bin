@@ -10,21 +10,24 @@ import (
 	"github.com/play-bin/internal/container"
 )
 
+// BotManager はすべての Discord 連携（Bot操作およびログ転送）のライフサイクルを統合管理する。
 type BotManager struct {
 	Config           *config.LoadedConfig
 	ContainerManager *container.Manager
 
+	// セッション管理：複数の Bot トークンに対し、個別の常駐セッションを保持する。
 	Sessions         map[string]*discordgo.Session
 	ChannelToServer  map[string]string
 	ChannelUpdatedAt time.Time
 	mu               sync.RWMutex
 
+	// ログ転送管理：各コンテナのログ監視プロセスを制御するためのキャンセル関数を保持。
 	ActiveForwarders map[string]context.CancelFunc
 	ForwarderMu      sync.RWMutex
 }
 
 // MARK: NewBotManager()
-// Discord Botの管理を行うマネージャーを作成する。
+// Discord Bot 管理の要となるインスタンスを、依存関係（config, manager）と共に初期化する。
 func NewBotManager(cfg *config.LoadedConfig, cm *container.Manager) *BotManager {
 	return &BotManager{
 		Config:           cfg,
@@ -36,18 +39,19 @@ func NewBotManager(cfg *config.LoadedConfig, cm *container.Manager) *BotManager 
 }
 
 // MARK: Start()
-// Botの同期プロセスとログ転送の管理プロセスを非同期で開始する。
+// Bot の同期とログ転送管理のバックグラウンドタスクをそれぞれ独立したゴルーチンで起動する。
 func (m *BotManager) Start() {
 	go m.runBotManager()
 	go m.runLogForwarderManager()
 }
 
 // MARK: runBotManager()
-// 一定間隔で設定をチェックし、Botの追加や削除（トークンの変更）を同期するループ。
+// 設定ファイルの更新を監視し、Bot の起動・停止・構成変更を動的に反映させるメインループ。
 func (m *BotManager) runBotManager() {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
+	// 起動時に即座に同期を実行
 	m.SyncBots()
 	for range ticker.C {
 		m.SyncBots()
@@ -55,7 +59,7 @@ func (m *BotManager) runBotManager() {
 }
 
 // MARK: runLogForwarderManager()
-// 一定間隔で設定をチェックし、ログ転送（Webhook）の有効・無効を同期するループ。
+// コンテナログ転送（Webhook）の有効・無効を、設定変更に合わせてリアルタイムに同期させるループ。
 func (m *BotManager) runLogForwarderManager() {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()

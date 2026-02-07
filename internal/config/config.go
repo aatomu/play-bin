@@ -18,7 +18,7 @@ type LoadedConfig struct {
 }
 
 // MARK: Config
-// config.json の構造を反映したマッピング。
+// config.json の構造を反映したデータモデル。
 type Config struct {
 	HTTPListen string                  `json:"httpListen,omitempty"`
 	SFTPListen string                  `json:"sftpListen,omitempty"`
@@ -71,13 +71,14 @@ type DiscordConfig struct {
 }
 
 // MARK: Get()
-// 現在の設定情報を取得する。ファイルの最終更新時刻をチェックし、変更があれば自動リロードを行う。
+// 現在の設定情報を取得する。
+// アクセス毎にファイルの最終更新時刻を検証し、変更があれば透過的にリロードを行う。
 func (c *LoadedConfig) Get() Config {
 	c.mu.RLock()
 	info, err := os.Stat("./config.json")
 
 	if err == nil && info.ModTime().After(c.LastLoaded) {
-		// 共有ロックを解除してから書き込みロックを取得してリロードを実行
+		// 設定変更を検知したため、共有ロックを解除して書き込みロック（リロード）へ昇格する。
 		c.mu.RUnlock()
 		c.Reload()
 		c.mu.RLock()
@@ -88,13 +89,14 @@ func (c *LoadedConfig) Get() Config {
 }
 
 // MARK: Reload()
-// ディスク上の config.json を読み込み、メモリ上のキャッシュを更新する。
+// ディスク上の config.json を読み込み、メモリ上のキャッシュをアトミックに更新する。
 func (c *LoadedConfig) Reload() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	f, err := os.Open("./config.json")
 	if err != nil {
+		// ファイル消失やパーミッション不足などの内部的な不整合（Internal）として扱う。
 		logger.Logf("Internal", "Config", "設定ファイルのオープンに失敗しました: %v", err)
 		return
 	}
@@ -102,6 +104,7 @@ func (c *LoadedConfig) Reload() {
 
 	var newCfg Config
 	if err := json.NewDecoder(f).Decode(&newCfg); err != nil {
+		// 不正なJSON形式は、管理者による編集ミスの可能性があるが、システム内処理としてInternalで記録する。
 		logger.Logf("Internal", "Config", "設定のパース（JSON）に失敗しました: %v", err)
 		return
 	}
