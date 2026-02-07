@@ -1,3 +1,4 @@
 config.json
 play-bin
 sftp*
+.agent
