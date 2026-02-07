@@ -186,34 +186,39 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 		return
 	}
 
+	// MARK: > Thinking...
+	err := dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
+		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
+	})
+	if err != nil {
+		log.Printf("Failed to defer interaction: %v", err)
+		return
+	}
+
 	switch i.ApplicationCommandData().Name {
 	case "action":
 		act := i.ApplicationCommandData().Options[0].StringValue()
 		err := m.ContainerManager.ExecuteAction(context.Background(), serverName, container.Action(act))
 		if err != nil {
-			dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: m.interactionError(act, err),
+			dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed(act, err)},
 			})
 			return
 		}
-		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: m.interactionSuccess(act, "Wait to be starting..."),
+		dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Embeds: &[]*discordgo.MessageEmbed{m.interactionSuccessEmbed(act, "SUCCESS")},
 		})
 	case "cmd":
 		text := i.ApplicationCommandData().Options[0].StringValue()
 		err := docker.SendCommand(serverName, text+"\n")
 		if err != nil {
-			dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-				Type: discordgo.InteractionResponseChannelMessageWithSource,
-				Data: m.interactionError("command", err),
+			dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed("command", err)},
 			})
 			return
 		}
-		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: m.interactionSuccess("command", ""),
+		dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Embeds: &[]*discordgo.MessageEmbed{m.interactionSuccessEmbed("command", "")},
 		})
 	}
 }
@@ -244,27 +249,18 @@ func (m *BotManager) onMessageCreate(dg *discordgo.Session, msg *discordgo.Messa
 	docker.SendCommand(serverName, text+"\n")
 }
 
-func (m *BotManager) interactionError(act string, err error) *discordgo.InteractionResponseData {
-	return &discordgo.InteractionResponseData{
-		Embeds: []*discordgo.MessageEmbed{
-			{
-				Color:       colorError,
-				Title:       fmt.Sprintf("Execution Error: %s", act),
-				Description: err.Error(),
-			},
-		},
-		Flags: discordgo.MessageFlagsEphemeral,
+func (m *BotManager) interactionErrorEmbed(act string, err error) *discordgo.MessageEmbed {
+	return &discordgo.MessageEmbed{
+		Color:       colorError,
+		Title:       fmt.Sprintf("Execution Error: %s", act),
+		Description: err.Error(),
 	}
 }
 
-func (m *BotManager) interactionSuccess(act string, desc string) *discordgo.InteractionResponseData {
-	return &discordgo.InteractionResponseData{
-		Embeds: []*discordgo.MessageEmbed{
-			{
-				Color:       colorSuccess,
-				Title:       fmt.Sprintf("Execution Success: %s", act),
-				Description: desc,
-			},
-		},
+func (m *BotManager) interactionSuccessEmbed(act string, desc string) *discordgo.MessageEmbed {
+	return &discordgo.MessageEmbed{
+		Color:       colorSuccess,
+		Title:       fmt.Sprintf("Execution Success: %s", act),
+		Description: desc,
 	}
 }
