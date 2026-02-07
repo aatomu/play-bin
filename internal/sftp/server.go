@@ -166,6 +166,11 @@ func (s *Server) handleConn(nConn net.Conn) {
 	}
 }
 
+var (
+	errVfsRoot          = fmt.Errorf("vfs_root")
+	errVfsContainerRoot = fmt.Errorf("vfs_container_root")
+)
+
 // MARK: vfsHandler
 // ユーザーの権限に基づき、ホスト上のパスを仮想ディレクトリ構造としてマッピングする構造体。
 type vfsHandler struct {
@@ -179,9 +184,9 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 	path = filepath.Clean(path)
 	parts := strings.Split(strings.Trim(path, "/"), string(filepath.Separator))
 
-	// ルート（全コンテナ一覧）の要求
+	// ルート（全コンテナ一覧）の要求時は、内部信号用のエラーを返す
 	if len(parts) == 0 || (len(parts) == 1 && parts[0] == "") {
-		return "", logger.InternalError("SFTP", "root access")
+		return "", errVfsRoot
 	}
 
 	containerName := parts[0]
@@ -209,9 +214,9 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 		return "", os.ErrNotExist
 	}
 
-	// コンテナのルート要求
+	// コンテナのルート要求（マウントポイント一覧）時は、内部信号用のエラーを返す
 	if len(parts) == 1 {
-		return "", logger.InternalError("SFTP", "container_root access")
+		return "", errVfsContainerRoot
 	}
 
 	// マウントされたディレクトリの解決
@@ -233,9 +238,13 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 // ディレクトリ内のファイル一覧を解決する。
 func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 	fullPath, err := h.mapPath(r.Filepath)
+
+	// アクセスログの記録（ルート階層を含む）
+	logger.Logf("Client", "SFTP", "ディレクトリ一覧取得: user=%s, path=%s", h.username, r.Filepath)
+
 	if err != nil {
-		// ルート階層では、ユーザーがアクセス可能なコンテナ名のリストを仮想的に生成する
-		if err.Error() == "[SFTP] root access" {
+		// ルート階層（コンテナ一覧）の生成
+		if err == errVfsRoot {
 			cfg := h.config.Get()
 			user := cfg.Users[h.username]
 			var items []os.FileInfo
@@ -253,8 +262,8 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			}
 			return &listerAt{items: items}, nil
 		}
-		// コンテナ直下では、マウントされているポイントを仮想ディレクトリとして返す
-		if err.Error() == "[SFTP] container_root access" {
+		// コンテナルート（マウントポイント一覧）の生成
+		if err == errVfsContainerRoot {
 			containerName := strings.Trim(r.Filepath, "/")
 			cfg := h.config.Get()
 			server := cfg.Servers[containerName]
@@ -268,7 +277,7 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		return nil, err
 	}
 
-	// 実パス配下は通常のファイルシステムとして読み取る
+	// 実ファイルシステムの一覧取得
 	files, err := os.ReadDir(fullPath)
 	if err != nil {
 		return nil, err
@@ -288,6 +297,7 @@ func (h *vfsHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 詳細なアクセス情報を記録
 	logger.Logf("Client", "SFTP", "ファイル読込: user=%s, path=%s", h.username, r.Filepath)
 	return os.Open(fullPath)
 }
@@ -299,6 +309,7 @@ func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	if err != nil {
 		return nil, err
 	}
+	// 詳細なアクセス情報を記録
 	logger.Logf("Client", "SFTP", "ファイル書込: user=%s, path=%s", h.username, r.Filepath)
 	// 常に新規作成、または上書きとしてオープンする。
 	return os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
@@ -312,7 +323,7 @@ func (h *vfsHandler) Filecmd(r *sftp.Request) error {
 		return err
 	}
 
-	// 操作の種類に応じてログを出力
+	// 操作の種類と対象を詳細に記録
 	logger.Logf("Client", "SFTP", "操作実行 (%s): user=%s, path=%s", r.Method, h.username, r.Filepath)
 
 	switch r.Method {
@@ -323,6 +334,7 @@ func (h *vfsHandler) Filecmd(r *sftp.Request) error {
 		if err != nil {
 			return err
 		}
+		logger.Logf("Client", "SFTP", "リネーム対象: %s -> %s (user=%s)", r.Filepath, r.Target, h.username)
 		return os.Rename(fullPath, targetPath)
 	case "Rmdir":
 		return os.RemoveAll(fullPath)
