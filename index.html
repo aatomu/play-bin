@@ -617,6 +617,7 @@
         // WebSocket を閉じ、ターミナルのリセットと UI 状態の初期化を行う。
         function disconnectTerminal() {
             if (wsTerm) wsTerm.close();
+            if (wsStats) wsStats.close();
             if (termDataListener) { termDataListener.dispose(); termDataListener = null; }
             term.reset();
             currentTermMode = "";
@@ -657,10 +658,6 @@
 
             document.getElementById('command-bar').style.display = isRunning ? 'flex' : 'none';
 
-            // 動いているコンテナが選択された場合は、利便性のために自動でログを購読開始する。
-            if (isRunning && (!wsTerm || wsTerm.readyState !== 1)) {
-                connectTerminal('logs');
-            }
             isRunningState = isRunning;
 
             // 基本情報のレンダリング
@@ -685,9 +682,8 @@
                 `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`
             ).join('') || "none";
 
-            // 生きているコンテナに対してのみ統計データのポーリングを許可する。
-            if (isRunning) startStats(selectedId);
-            else if (wsStats) wsStats.close();
+            // 統計データのポーリングは明示的なアクション（Terminal接続等）に合わせるためここでは行わない。
+            if (!isRunning && wsStats) wsStats.close();
         }
 
         // MARK: connectTerminal()
@@ -697,6 +693,9 @@
             disconnectTerminal();
             currentTermMode = mode;
             document.getElementById('term-placeholder').style.display = 'none';
+
+            // 統計データのポーリングも同時に開始する。
+            startStats(selectedId);
 
             // 接続試行。 token による認証をクエリパラメータ経由で付与。
             // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
