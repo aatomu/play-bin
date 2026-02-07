@@ -68,7 +68,7 @@ graph TD
     API -- "Internal Call" --> ContainerMgr
     BotManager -- "Internal Call" --> ContainerMgr
     SFTPService -- "Internal Call" --> ContainerMgr
-    BotManager -- "HTTP (Webhook)" --> DiscordWebhook
+    BotManager -- "HTTP (Post)" --> DiscordWebhook
 
     ContainerMgr -- "Control (gRPC/HTTP)" --> DockerWrapper
     ContainerMgr -- "Query" --> ConfigMgr

@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/bwmarrin/discordgo"
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
@@ -89,15 +89,6 @@ func (m *BotManager) SyncLogForwarders() {
 // MARK: tailContainerLogs()
 // Dockerコンテナのストリームログを監視し、ルールにマッチした行をDiscord Webhookに送信する。
 func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSettingPath, webhookURL string) {
-	// Webhook URL から ID とトークンを抽出
-	parts := strings.Split(webhookURL, "/")
-	if len(parts) < 7 {
-		logger.Logf("Internal", "Discord", "Webhook URLが不正です (%s): %s", serverName, webhookURL)
-		return
-	}
-	webhookID := parts[len(parts)-2]
-	webhookToken := parts[len(parts)-1]
-
 	options := ctypes.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
@@ -159,7 +150,7 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 							avatarURL = strings.ReplaceAll(avatarURL, p, match)
 						}
 
-						m.executeWebhook(webhookID, webhookToken, username, content, avatarURL)
+						m.executeWebhook(webhookURL, username, content, avatarURL)
 						break
 					}
 				}
@@ -241,15 +232,29 @@ func loadLogRules(path string) ([]LogRule, error) {
 
 // MARK: executeWebhook()
 // 生成されたメッセージを Discord Webhook 経由で送信する。
-func (m *BotManager) executeWebhook(id, token, user, content, avatar string) {
-	dg, _ := discordgo.New("")
-	p := &discordgo.WebhookParams{
-		Content:   content,
-		Username:  user,
-		AvatarURL: avatar,
+func (m *BotManager) executeWebhook(webhookURL, user, content, avatar string) {
+	// Webhook送信用のペイロードを構築
+	payload := map[string]string{
+		"content":    content,
+		"username":   user,
+		"avatar_url": avatar,
 	}
-	_, err := dg.WebhookExecute(id, token, true, p)
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		logger.Logf("Internal", "Discord", "Webhookペイロードの生成に失敗: %v", err)
+		return
+	}
+
+	// 整合性確保のため、操作前に状態をロックする必要はないが、HTTPリクエストを送信する
+	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(jsonData)))
 	if err != nil {
 		logger.Logf("External", "Discord", "Webhook送信失敗: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		logger.Logf("External", "Discord", "Webhook送信エラー (HTTP %d)", resp.StatusCode)
 	}
 }
