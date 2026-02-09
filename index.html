@@ -1,776 +1,1026 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="ja">
-
-<head>
-    <meta charset="UTF-8">
+  <head>
+    <meta charset="UTF-8" />
     <title>play-bin</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css"
+    />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
 
     <style>
-        :root {
-            --bg: #0d0d0d;
-            --panel: #1a1a1a;
-            --border: #333;
-            --accent: #0081cc;
-            --danger: #cc3333;
-            --success: #4caf50;
-            --warning: #f39c12;
-            --text: #eee;
-            --muted: #888;
-        }
+      :root {
+        --bg: #0d0d0d;
+        --panel: #1a1a1a;
+        --border: #333;
+        --accent: #0081cc;
+        --danger: #cc3333;
+        --success: #4caf50;
+        --warning: #f39c12;
+        --text: #eee;
+        --muted: #888;
+      }
 
-        body,
-        html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Inter', sans-serif;
-            overflow: hidden;
-        }
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--bg);
+        color: var(--text);
+        font-family: "Inter", sans-serif;
+        overflow: hidden;
+      }
 
-        /* --- モーダル --- */
-        #modal-overlay {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.8);
-            display: none;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
+      /* --- モーダル --- */
+      #modal-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.8);
+        display: none;
+        align-items: center;
+        justify-content: center;
+        z-index: 2000;
+      }
 
-        .modal {
-            background: var(--panel);
-            padding: 25px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            width: 350px;
-            text-align: center;
-        }
+      .modal {
+        background: var(--panel);
+        padding: 25px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        width: 350px;
+        text-align: center;
+      }
 
-        .modal-btns {
-            display: flex;
-            gap: 10px;
-            justify-content: center;
-            margin-top: 20px;
-        }
+      .modal-btns {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        margin-top: 20px;
+      }
 
-        /* --- レイアウト --- */
-        #login-screen {
-            position: fixed;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--bg);
-            z-index: 1000;
-        }
+      /* --- レイアウト --- */
+      #login-screen {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--bg);
+        z-index: 1000;
+      }
 
-        .login-card {
-            background: var(--panel);
-            padding: 40px;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-            width: 320px;
-            text-align: center;
-        }
+      .login-card {
+        background: var(--panel);
+        padding: 40px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        width: 320px;
+        text-align: center;
+      }
 
-        input {
-            width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            background: #222;
-            border: 1px solid var(--border);
-            color: white;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
+      input {
+        width: 100%;
+        padding: 12px;
+        margin: 10px 0;
+        background: #222;
+        border: 1px solid var(--border);
+        color: white;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
 
-        button {
-            padding: 6px 12px;
-            cursor: pointer;
-            border-radius: 4px;
-            border: 1px solid var(--border);
-            background: #333;
-            color: white;
-            font-size: 12px;
-            transition: 0.2s;
-        }
+      button {
+        padding: 6px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        border: 1px solid var(--border);
+        background: #333;
+        color: white;
+        font-size: 12px;
+        transition: 0.2s;
+      }
 
-        button:hover {
-            background: #444;
-        }
+      button:hover {
+        background: #444;
+      }
 
-        button.primary {
-            background: var(--accent);
-            border: none;
-            font-weight: bold;
-        }
+      button.primary {
+        background: var(--accent);
+        border: none;
+        font-weight: bold;
+      }
 
-        button.danger {
-            background: var(--danger);
-            border: none;
-        }
+      button.danger {
+        background: var(--danger);
+        border: none;
+      }
 
-        button.success {
-            background: var(--success);
-            border: none;
-        }
+      button.success {
+        background: var(--success);
+        border: none;
+      }
 
-        button.warning {
-            background: var(--warning);
-            border: none;
-            color: #000;
-            font-weight: bold;
-        }
+      button.warning {
+        background: var(--warning);
+        border: none;
+        color: #000;
+        font-weight: bold;
+      }
 
-        #app {
-            display: none;
-            height: 100vh;
-            grid-template-columns: 260px 1fr;
-            grid-template-rows: 50px 1fr 220px;
-        }
+      #app {
+        display: none;
+        height: 100vh;
+        grid-template-columns: 260px 1fr;
+        grid-template-rows: 50px 1fr 220px;
+      }
 
-        header {
-            grid-column: 1 / -1;
-            background: var(--panel);
-            border-bottom: 1px solid var(--border);
-            display: flex;
-            align-items: center;
-            padding: 0 20px;
-            justify-content: space-between;
-        }
+      header {
+        grid-column: 1 / -1;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        justify-content: space-between;
+      }
 
-        #sidebar {
-            grid-row: 2 / 4;
-            background: var(--panel);
-            border-right: 1px solid var(--border);
-            padding: 10px;
-            overflow-y: auto;
-        }
+      #sidebar {
+        grid-row: 2 / 4;
+        background: var(--panel);
+        border-right: 1px solid var(--border);
+        padding: 10px;
+        overflow-y: auto;
+      }
 
-        .container-item {
-            padding: 10px;
-            margin: 4px 0;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-        }
+      .container-item {
+        padding: 10px;
+        margin: 4px 0;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        display: flex;
+        align-items: center;
+      }
 
-        .container-item:hover {
-            background: #2a2a2a;
-        }
+      .container-item:hover {
+        background: #2a2a2a;
+      }
 
-        .container-item.active {
-            background: #222;
-            border-left: 4px solid var(--accent);
-        }
+      .container-item.active {
+        background: #222;
+        border-left: 4px solid var(--accent);
+      }
 
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            margin-right: 12px;
-            background: var(--muted);
-        }
+      .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 12px;
+        background: var(--muted);
+      }
 
-        .dot.running {
-            background: var(--success);
-            box-shadow: 0 0 8px var(--success);
-        }
+      .dot.running {
+        background: var(--success);
+        box-shadow: 0 0 8px var(--success);
+      }
 
-        #main-content {
-            padding: 15px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
+      #main-content {
+        padding: 15px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
 
-        .terminal-box {
-            flex: 1;
-            background: black;
-            border-radius: 8px;
-            overflow: hidden;
-            border: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-        }
+      .terminal-box {
+        flex: 1;
+        background: black;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        display: flex;
+        flex-direction: column;
+      }
 
-        .term-header {
-            background: #222;
-            padding: 8px 15px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            font-size: 13px;
-        }
+      .term-header {
+        background: #222;
+        padding: 8px 15px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 13px;
+      }
 
-        .btn-group {
-            display: flex;
-            gap: 5px;
-            align-items: center;
-        }
+      .btn-group {
+        display: flex;
+        gap: 5px;
+        align-items: center;
+      }
 
-        #xterm-container {
-            flex: 1;
-            position: relative;
-            background: #000;
-        }
+      #xterm-container {
+        flex: 1;
+        position: relative;
+        background: #000;
+      }
 
-        #term-placeholder {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #444;
-            background: #000;
-            z-index: 5;
-        }
+      #term-placeholder {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #444;
+        background: #000;
+        z-index: 5;
+      }
 
-        #detail-panel {
-            grid-column: 2;
-            background: var(--panel);
-            border-top: 1px solid var(--border);
-            padding: 12px;
-            display: grid;
-            grid-template-columns: 200px 200px 1fr 1fr;
-            gap: 12px;
-        }
+      #detail-panel {
+        grid-column: 2;
+        background: var(--panel);
+        border-top: 1px solid var(--border);
+        padding: 12px;
+        display: grid;
+        grid-template-columns: 200px 200px 1fr 1fr;
+        gap: 12px;
+      }
 
-        .metric-card {
-            background: #222;
-            padding: 12px;
-            border-radius: 6px;
-            border: 1px solid #333;
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-        }
+      .metric-card {
+        background: #222;
+        padding: 12px;
+        border-radius: 6px;
+        border: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+      }
 
-        .metric-label {
-            font-size: 9px;
-            color: var(--muted);
-            text-transform: uppercase;
-            margin-bottom: 2px;
-        }
+      .metric-label {
+        font-size: 9px;
+        color: var(--muted);
+        text-transform: uppercase;
+        margin-bottom: 2px;
+      }
 
-        .metric-value {
-            font-size: 15px;
-            font-weight: bold;
-            color: var(--accent);
-            margin-bottom: 8px;
-        }
+      .metric-value {
+        font-size: 15px;
+        font-weight: bold;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
 
-        .progress-bg {
-            height: 4px;
-            background: #333;
-            border-radius: 2px;
-            margin-bottom: 4px;
-            overflow: hidden;
-        }
+      .progress-bg {
+        height: 4px;
+        background: #333;
+        border-radius: 2px;
+        margin-bottom: 4px;
+        overflow: hidden;
+      }
 
-        .progress-fill {
-            height: 100%;
-            background: var(--accent);
-            width: 0%;
-            transition: width 0.3s;
-        }
+      .progress-fill {
+        height: 100%;
+        background: var(--accent);
+        width: 0%;
+        transition: width 0.3s;
+      }
 
-        .info-grid {
-            display: grid;
-            grid-template-columns: 85px 1fr;
-            gap: 4px;
-            font-size: 11px;
-            color: #ccc;
-        }
+      .info-grid {
+        display: grid;
+        grid-template-columns: 85px 1fr;
+        gap: 4px;
+        font-size: 11px;
+        color: #ccc;
+      }
 
-        .info-grid span:nth-child(odd) {
-            color: var(--muted);
-            font-weight: bold;
-            text-transform: uppercase;
-            font-size: 9px;
-        }
+      .info-grid span:nth-child(odd) {
+        color: var(--muted);
+        font-weight: bold;
+        text-transform: uppercase;
+        font-size: 9px;
+      }
 
-        .scroll-list {
-            font-size: 10px;
-            color: #aaa;
-            margin-top: 2px;
-            border-top: 1px solid #333;
-            padding-top: 4px;
-        }
+      .scroll-list {
+        font-size: 10px;
+        color: #aaa;
+        margin-top: 2px;
+        border-top: 1px solid #333;
+        padding-top: 4px;
+      }
     </style>
-</head>
+  </head>
 
-<body>
-
+  <body>
     <div id="modal-overlay">
-        <div class="modal">
-            <h3 id="modal-title">Confirm Action</h3>
-            <p id="modal-body" style="font-size: 14px; color: var(--muted);">Are you sure?</p>
-            <div class="modal-btns">
-                <button onclick="closeModal()">Cancel</button>
-                <button id="modal-confirm-btn" class="primary">Execute</button>
-            </div>
+      <div class="modal">
+        <h3 id="modal-title">Confirm Action</h3>
+        <p id="modal-body" style="font-size: 14px; color: var(--muted)">
+          Are you sure?
+        </p>
+        <div class="modal-btns">
+          <button onclick="closeModal()">Cancel</button>
+          <button id="modal-confirm-btn" class="primary">Execute</button>
         </div>
+      </div>
     </div>
 
     <div id="login-screen">
-        <div class="login-card">
-            <h2>play-bin</h2>
-            <form id="login-form" onsubmit="event.preventDefault(); doLogin();">
-                <input type="text" placeholder="Username" id="user" autocomplete="username">
-                <input type="password" placeholder="Password" id="password" autocomplete="current-password">
-                <button type="submit" class="primary">Login</button>
-            </form>
-        </div>
+      <div class="login-card">
+        <h2>play-bin</h2>
+        <form
+          id="login-form"
+          onsubmit="
+            event.preventDefault();
+            doLogin();
+          "
+        >
+          <input
+            type="text"
+            placeholder="Username"
+            id="user"
+            autocomplete="username"
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            id="password"
+            autocomplete="current-password"
+          />
+          <button type="submit" class="primary">Login</button>
+        </form>
+      </div>
     </div>
 
     <div id="app">
-        <header>
-            <div style="font-weight:600">play-bin</div>
-            <div id="session-info" style="font-size:12px; color:var(--muted)">Session: Active</div>
-        </header>
-
-        <div id="sidebar">
-            <div style="color:var(--muted); font-size:11px; margin-bottom:10px; padding-left:10px;">CONTAINERS</div>
-            <div id="list-target"></div>
+      <header>
+        <div style="font-weight: 600">play-bin</div>
+        <div id="session-info" style="font-size: 12px; color: var(--muted)">
+          Session: Active
         </div>
+      </header>
 
-        <div id="main-content">
-            <div class="terminal-box">
-                <div class="term-header">
-                    <span id="term-name">Console: No Container Selected</span>
-                    <div class="btn-group">
-                        <button id="btn-start" class="success" onclick="confirmAction('start')" style="display:none;">Start</button>
-                        <button id="btn-stop" class="danger" onclick="confirmAction('stop')" style="display:none;">Stop</button>
-
-                        <span id="control-divider" style="margin: 0 5px; border-left: 1px solid #444; height: 20px; display:none;"></span>
-
-                        <span id="term-controls" style="display: flex; gap: 5px;">
-                            <button id="btn-exec" onclick="connectTerminal('exec')">Exec</button>
-                            <button id="btn-logs" onclick="connectTerminal('logs')">Tail Logs</button>
-                            <button id="btn-backup" onclick="confirmAction('backup')">Backup</button>
-                            <button id="btn-restore" onclick="confirmAction('restore')">Restore</button>
-                            <button id="btn-kill" class="danger" onclick="confirmAction('kill')">Kill</button>
-                        </span>
-
-                        <button id="btn-disconnect" class="danger" onclick="disconnectTerminal()" style="display:none;">Disconnect</button>
-                    </div>
-                </div>
-                <div id="xterm-container" style="flex: 1; min-height: 0; position: relative; background: #000;">
-                    <div id="term-placeholder">Select a container</div>
-                    <div id="terminal" style="height: 100%;"></div>
-                </div>
-                <div id="command-bar" style="background: #111; border-top: 1px solid var(--border); padding: 8px 15px; display: none; align-items: center; gap: 10px; flex-shrink: 0;">
-                    <span style="font-size: 12px; color: var(--muted); font-weight: bold;">COMMAND:</span>
-                    <textarea id="command-input" placeholder="Type commands... (Enter to send, Shift+Enter for new line)" 
-                        style="margin: 0; flex: 1; height: 32px; min-height: 32px; max-height: 120px; font-family: monospace; background: #222; color: #fff; border: 1px solid var(--border); border-radius: 4px; padding: 6px; resize: vertical;" 
-                        onkeydown="if(event.key==='Enter' && !event.shiftKey) { event.preventDefault(); sendCommand(); }" disabled></textarea>
-                    <button id="btn-send" class="primary" onclick="sendCommand()" style="height: 32px; opacity: 0.5; pointer-events: none;">Send</button>
-                </div>
-            </div>
+      <div id="sidebar">
+        <div
+          style="
+            color: var(--muted);
+            font-size: 11px;
+            margin-bottom: 10px;
+            padding-left: 10px;
+          "
+        >
+          CONTAINERS
         </div>
+        <div id="list-target"></div>
+      </div>
 
-        <div id="detail-panel">
-            <div class="metric-card">
-                <div class="metric-label">CPU Usage</div>
-                <div class="metric-value" id="cpu-text">-</div>
-                <div class="progress-bg">
-                    <div id="cpu-bar" class="progress-fill"></div>
-                </div>
-                <div class="metric-label">Memory Usage</div>
-                <div class="metric-value" id="mem-text">-</div>
-                <div class="progress-bg">
-                    <div id="mem-bar" class="progress-fill"></div>
-                </div>
-                <div class="metric-label">PID</div>
-                <div class="metric-value" id="info-pid" style="color:#eee;">-</div>
+      <div id="main-content">
+        <div class="terminal-box">
+          <div class="term-header">
+            <span id="term-name">Console: No Container Selected</span>
+            <div class="btn-group">
+              <button
+                id="btn-start"
+                class="success"
+                onclick="confirmAction('start')"
+                style="display: none"
+              >
+                Start
+              </button>
+              <button
+                id="btn-stop"
+                class="danger"
+                onclick="confirmAction('stop')"
+                style="display: none"
+              >
+                Stop
+              </button>
+
+              <span
+                id="control-divider"
+                style="
+                  margin: 0 5px;
+                  border-left: 1px solid #444;
+                  height: 20px;
+                  display: none;
+                "
+              ></span>
+
+              <span id="term-controls" style="display: flex; gap: 5px">
+                <button id="btn-exec" onclick="connectTerminal('exec')">
+                  Exec
+                </button>
+                <button id="btn-logs" onclick="connectTerminal('logs')">
+                  Tail Logs
+                </button>
+                <button id="btn-backup" onclick="confirmAction('backup')">
+                  Backup
+                </button>
+                <button id="btn-restore" onclick="confirmAction('restore')">
+                  Restore
+                </button>
+                <button
+                  id="btn-kill"
+                  class="danger"
+                  onclick="confirmAction('kill')"
+                >
+                  Kill
+                </button>
+              </span>
+
+              <button
+                id="btn-disconnect"
+                class="danger"
+                onclick="disconnectTerminal()"
+                style="display: none"
+              >
+                Disconnect
+              </button>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">Status</div>
-                <div class="metric-value" id="info-status">-</div>
-                <div class="metric-label">Uptime</div>
-                <div class="metric-value" id="uptime-text">-</div>
-                <div class="metric-label">Started At</div>
-                <div id="info-started" style="font-size:10px; color:#eee;">-</div>
-            </div>
-            <div class="metric-card">
-                <div class="info-grid">
-                    <span>Net Mode</span><span id="info-netmode">-</span>
-                    <span>Restart Pol</span><span id="info-restart">-</span>
-                    <span>Auto Remove</span><span id="info-autoremove">-</span>
-                    <span>Ports Bind</span><span></span>
-                </div>
-                <div id="info-ports" class="scroll-list"></div>
-            </div>
-            <div class="metric-card">
-                <div class="metric-label">Mounts (Dest / Type)</div>
-                <div id="info-mounts" class="scroll-list" style="max-height: 140px;"></div>
-            </div>
+          </div>
+          <div
+            id="xterm-container"
+            style="flex: 1; min-height: 0; position: relative; background: #000"
+          >
+            <div id="term-placeholder">Select a container</div>
+            <div id="terminal" style="height: 100%"></div>
+          </div>
+          <div
+            id="command-bar"
+            style="
+              background: #111;
+              border-top: 1px solid var(--border);
+              padding: 8px 15px;
+              display: none;
+              align-items: center;
+              gap: 10px;
+              flex-shrink: 0;
+            "
+          >
+            <span
+              style="font-size: 12px; color: var(--muted); font-weight: bold"
+              >COMMAND:</span
+            >
+            <textarea
+              id="command-input"
+              placeholder="Type commands... (Enter to send, Shift+Enter for new line)"
+              style="
+                margin: 0;
+                flex: 1;
+                height: 32px;
+                min-height: 32px;
+                max-height: 120px;
+                font-family: monospace;
+                background: #222;
+                color: #fff;
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                padding: 6px;
+                resize: vertical;
+              "
+              onkeydown="
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  sendCommand();
+                }
+              "
+              disabled
+            ></textarea>
+            <button
+              id="btn-send"
+              class="primary"
+              onclick="sendCommand()"
+              style="height: 32px; opacity: 0.5; pointer-events: none"
+            >
+              Send
+            </button>
+          </div>
         </div>
+      </div>
+
+      <div id="detail-panel">
+        <div class="metric-card">
+          <div class="metric-label">CPU Usage</div>
+          <div class="metric-value" id="cpu-text">-</div>
+          <div class="progress-bg">
+            <div id="cpu-bar" class="progress-fill"></div>
+          </div>
+          <div class="metric-label">Memory Usage</div>
+          <div class="metric-value" id="mem-text">-</div>
+          <div class="progress-bg">
+            <div id="mem-bar" class="progress-fill"></div>
+          </div>
+          <div class="metric-label">PID</div>
+          <div class="metric-value" id="info-pid" style="color: #eee">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Status</div>
+          <div class="metric-value" id="info-status">-</div>
+          <div class="metric-label">Uptime</div>
+          <div class="metric-value" id="uptime-text">-</div>
+          <div class="metric-label">Started At</div>
+          <div id="info-started" style="font-size: 10px; color: #eee">-</div>
+        </div>
+        <div class="metric-card">
+          <div class="info-grid">
+            <span>Net Mode</span><span id="info-netmode">-</span>
+            <span>Restart Pol</span><span id="info-restart">-</span>
+            <span>Auto Remove</span><span id="info-autoremove">-</span>
+            <span>Ports Bind</span><span></span>
+          </div>
+          <div id="info-ports" class="scroll-list"></div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">Mounts (Dest / Type)</div>
+          <div
+            id="info-mounts"
+            class="scroll-list"
+            style="max-height: 140px"
+          ></div>
+        </div>
+      </div>
     </div>
 
     <script>
-        // --- グローバル状態管理 ---
-        let token = "";          // API認証用。ログイン成功時にサーバーから付録される
-        let selectedId = "";     // コンテナ操作の主体。Docker ID または設定ファイルのサーバー名が入る
-        let selectedName = "";   // UI表示用。ユーザーが認識しやすいコンテナ名
-        let isRunningState = false; // 現在のコンテナが実行中かどうか
-        let currentTermMode = "";   // 現在のターミナルモード (logs/exec)
-        let wsTerm, wsStats;    // WebSocketコネクションを保持し、リアルタイム通信を管理する
-        let termDataListener;   // xterm.jsのイベントを購読し、解除可能にするための参照保持
+      // --- グローバル状態管理 ---
+      let token = ""; // API認証用。ログイン成功時にサーバーから付録される
+      let selectedId = ""; // コンテナ操作の主体。Docker ID または設定ファイルのサーバー名が入る
+      let selectedName = ""; // UI表示用。ユーザーが認識しやすいコンテナ名
+      let isRunningState = false; // 現在のコンテナが実行中かどうか
+      let currentTermMode = ""; // 現在のターミナルモード (logs/exec)
+      let wsTerm, wsStats; // WebSocketコネクションを保持し、リアルタイム通信を管理する
+      let termDataListener; // xterm.jsのイベントを購読し、解除可能にするための参照保持
+      let logTailCount = 1000; // 初回およびスクロール追加時の読み込み行数
+      let isFetchingLogs = false; // 二重リクエスト防止
+      let containerListTimer = null; // コンテナ一覧取得のポーリングタイマー
 
-        // MARK: updateCommandBarState()
-        // ターミナルの接続状態やモードに応じて、コマンド送信用の入力フィールドとボタンの有効・無効を制御する。
-        function updateCommandBarState() {
-            const isConnected = wsTerm && wsTerm.readyState === 1;
-            const input = document.getElementById('command-input');
-            const btn = document.getElementById('btn-send');
-            
-            // 接続かつ、操作モードである場合のみ送信を許可することで、誤送信によるエラーを防止する。
-            if (isConnected && currentTermMode) {
-                input.disabled = false;
-                input.placeholder = currentTermMode === 'exec' ? 'Type commands...' : 'Command to stdin...';
-                btn.style.opacity = "1";
-                btn.style.pointerEvents = "auto";
-            } else {
-                input.disabled = true;
-                input.value = "";
-                input.placeholder = "Select a container and mode";
-                btn.style.opacity = "0.5";
-                btn.style.pointerEvents = "none";
+      // ターミナル実体（xterm.js）の初期化。UI読み込み時に一度だけ実行され、基本的な外観とアドオン（Fit）を設定する。
+      // 無限スクロールをサポートするため、scrollbackを十分に（10万行等）確保する。
+      const term = new Terminal({
+        convertEol: true,
+        cursorBlink: true,
+        theme: { background: "#000" },
+        fontSize: 13,
+        scrollback: 100000,
+      });
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(document.getElementById("terminal"));
+      // MARK: updateCommandBarState()
+      // ターミナルの接続状態やモードに応じて、コマンド送信用の入力フィールドとボタンの有効・無効を制御する。
+      function updateCommandBarState() {
+        const isConnected = wsTerm && wsTerm.readyState === 1;
+        const input = document.getElementById("command-input");
+        const btn = document.getElementById("btn-send");
+
+        // 接続かつ、操作モードである場合のみ送信を許可することで、誤送信によるエラーを防止する。
+        if (isConnected && currentTermMode) {
+          input.disabled = false;
+          input.placeholder =
+            currentTermMode === "exec"
+              ? "Type commands..."
+              : "Command to stdin...";
+          btn.style.opacity = "1";
+          btn.style.pointerEvents = "auto";
+        } else {
+          input.disabled = true;
+          input.value = "";
+          input.placeholder = "Select a container and mode";
+          btn.style.opacity = "0.5";
+          btn.style.pointerEvents = "none";
+        }
+      }
+
+      // MARK: term.onScroll()
+      // ユーザーが一番上までスクロールした際、過去のログを非同期で取得してバッファの先頭に挿入する。
+      term.onScroll(async (newPos) => {
+        // スクロール位置が最上部であり、かつログモードで使用中、かつ取得中でない場合のみ実行。
+        if (newPos === 0 && currentTermMode === "logs" && !isFetchingLogs) {
+          isFetchingLogs = true;
+
+          // 2ページ分（ターミナルの高さの2倍）を目安に行数を算出。
+          const linesToFetch = term.rows * 2;
+          // 現在のバッファの総行数を取得（これより前のログが欲しい）
+          const currentBufferLength = term.buffer.active.length;
+
+          try {
+            // バックエンドから過去のログ（現在のバッファより多い行数）を取得し、差分を上に付け足す。
+            // Docker APIの制約上「offset」の指定が難しいため、一括取得して既存分を読み飛ばすアプローチ。
+            const nextTail = currentBufferLength + linesToFetch;
+            const res = await fetch(
+              `/api/container/logs?id=${selectedId}&tail=${nextTail}`,
+              {
+                headers: { Authorization: token },
+              },
+            );
+            if (!res.ok) throw new Error("Failed to fetch older logs");
+
+            const text = await res.text();
+            const allLines = text.split("\n");
+
+            // 新しく取得したログのうち、まだ表示していない「古い」行のみを抽出。
+            const newLines = allLines.slice(
+              0,
+              allLines.length - currentBufferLength,
+            );
+
+            if (newLines.length > 0) {
+              // 現在のスクロール位置を維持するため、一時的に描画をリセットして再構築する。
+              // xterm.jsのバッファ先頭への直接挿入は困難なため、全体を書き直す。
+              term.reset();
+              term.write("\x1b[33m--- Historical Logs Loaded ---\x1b[0m\r\n");
+              term.write(newLines.join("\r\n") + "\r\n");
+              term.write(
+                allLines
+                  .slice(allLines.length - currentBufferLength)
+                  .join("\r\n"),
+              );
+
+              // 読み込んだ分だけスクロール位置を調整し、ユーザーの視界が飛ばないようにする。
+              term.scrollToLine(newLines.length);
             }
+          } catch (e) {
+            console.error("Scroll load error:", e);
+          } finally {
+            isFetchingLogs = false;
+          }
         }
+      });
 
-        let logTailCount = 1000; // 初回およびスクロール追加時の読み込み行数
-        let isFetchingLogs = false; // 二重リクエスト防止
+      // ブラウザのウィンドウサイズ変更を検知し、ターミナルの文字幅・行数が親要素に最適化されるよう再計算を依頼する。
+      window.addEventListener("resize", () => {
+        try {
+          fitAddon.fit();
+        } catch (e) {}
+      });
 
-        // ターミナル実体（xterm.js）の初期化。UI読み込み時に一度だけ実行され、基本的な外観とアドオン（Fit）を設定する。
-        // 無限スクロールをサポートするため、scrollbackを十分に（10万行等）確保する。
-        const term = new Terminal({ 
-            convertEol: true, 
-            cursorBlink: true, 
-            theme: { background: '#000' }, 
-            fontSize: 13,
-            scrollback: 100000 
-        });
-        const fitAddon = new FitAddon.FitAddon();
-        term.loadAddon(fitAddon);
-        term.open(document.getElementById('terminal'));
+      // MARK: confirmAction()
+      // ユーザーが実行ボタン等を押した際、誤操作によるシステム停止やデータ上書きを防ぐため、実行確認のダイアログを前面に表示する。
+      function confirmAction(action) {
+        // 対象が未選択の状態でアクションを起こさせない（安全ガード）
+        if (!selectedId) return;
+        const overlay = document.getElementById("modal-overlay");
+        const confirmBtn = document.getElementById("modal-confirm-btn");
 
-        // MARK: term.onScroll()
-        // ユーザーが一番上までスクロールした際、過去のログを非同期で取得してバッファの先頭に挿入する。
-        term.onScroll(async (newPos) => {
-            // スクロール位置が最上部であり、かつログモードで使用中、かつ取得中でない場合のみ実行。
-            if (newPos === 0 && currentTermMode === 'logs' && !isFetchingLogs) {
-                isFetchingLogs = true;
-                
-                // 2ページ分（ターミナルの高さの2倍）を目安に行数を算出。
-                const linesToFetch = term.rows * 2;
-                // 現在のバッファの総行数を取得（これより前のログが欲しい）
-                const currentBufferLength = term.buffer.active.length;
-                
-                try {
-                    // バックエンドから過去のログ（現在のバッファより多い行数）を取得し、差分を上に付け足す。
-                    // Docker APIの制約上「offset」の指定が難しいため、一括取得して既存分を読み飛ばすアプローチ。
-                    const nextTail = currentBufferLength + linesToFetch;
-                    const res = await fetch(`/api/container/logs?id=${selectedId}&tail=${nextTail}`, {
-                        headers: { 'Authorization': token }
-                    });
-                    if (!res.ok) throw new Error("Failed to fetch older logs");
-                    
-                    const text = await res.text();
-                    const allLines = text.split('\n');
-                    
-                    // 新しく取得したログのうち、まだ表示していない「古い」行のみを抽出。
-                    const newLines = allLines.slice(0, allLines.length - currentBufferLength);
-                    
-                    if (newLines.length > 0) {
-                        // 現在のスクロール位置を維持するため、一時的に描画をリセットして再構築する。
-                        // xterm.jsのバッファ先頭への直接挿入は困難なため、全体を書き直す。
-                        term.reset();
-                        term.write('\x1b[33m--- Historical Logs Loaded ---\x1b[0m\r\n');
-                        term.write(newLines.join('\r\n') + '\r\n');
-                        term.write(allLines.slice(allLines.length - currentBufferLength).join('\r\n'));
-                        
-                        // 読み込んだ分だけスクロール位置を調整し、ユーザーの視界が飛ばないようにする。
-                        term.scrollToLine(newLines.length);
-                    }
-                } catch (e) {
-                    console.error("Scroll load error:", e);
-                } finally {
-                    isFetchingLogs = false;
-                }
-            }
-        });
+        document.getElementById("modal-title").innerText =
+          `Container ${action.toUpperCase()}`;
 
-        // ブラウザのウィンドウサイズ変更を検知し、ターミナルの文字幅・行数が親要素に最適化されるよう再計算を依頼する。
-        window.addEventListener('resize', () => { try { fitAddon.fit(); } catch (e) { } });
+        // ユーザーに意図を確認し、承認があれば API リクエストへ繋げる。
+        document.getElementById("modal-body").innerText =
+          `本当に "${selectedName}" に対して ${action} を実行しますか？`;
+        confirmBtn.onclick = () => {
+          executeContainerAction(action);
+          closeModal();
+        };
 
-        // MARK: confirmAction()
-        // ユーザーが実行ボタン等を押した際、誤操作によるシステム停止やデータ上書きを防ぐため、実行確認のダイアログを前面に表示する。
-        function confirmAction(action) {
-            // 対象が未選択の状態でアクションを起こさせない（安全ガード）
-            if (!selectedId) return; 
-            const overlay = document.getElementById('modal-overlay');
-            const confirmBtn = document.getElementById('modal-confirm-btn');
+        overlay.style.display = "flex";
+      }
 
-            document.getElementById('modal-title').innerText = `Container ${action.toUpperCase()}`;
+      // MARK: closeModal()
+      // 不要になったモーダルを画面から隠す。
+      function closeModal() {
+        document.getElementById("modal-overlay").style.display = "none";
+      }
 
-            // ユーザーに意図を確認し、承認があれば API リクエストへ繋げる。
-            document.getElementById('modal-body').innerText = `本当に "${selectedName}" に対して ${action} を実行しますか？`;
-            confirmBtn.onclick = () => { executeContainerAction(action); closeModal(); };
+      // MARK: executeContainerAction()
+      // ユーザーの承認を受け、バックエンドのコンテナ操作 API に対して認証済みのリクエストを発行する。
+      async function executeContainerAction(action) {
+        try {
+          const res = await fetch(`/api/container/${action}?id=${selectedId}`, {
+            method: "POST",
+            headers: { Authorization: token },
+          });
+          if (!res.ok) throw new Error(`${action} に失敗しました`);
 
-            overlay.style.display = 'flex';
+          // Docker エンジンの状態変更（非同期）を考慮し、ステータスの再反映までに猶予を持たせる。
+          setTimeout(() => {
+            fetchContainers();
+            loadInspectData(selectedId);
+          }, 1000);
+        } catch (e) {
+          alert(e.message);
         }
+      }
 
-        // MARK: closeModal()
-        // 不要になったモーダルを画面から隠す。
-        function closeModal() { document.getElementById('modal-overlay').style.display = 'none'; }
+      // MARK: doLogin()
+      // ログイン情報をサーバーへ送り、セッション維持用のトークンを受け取る。成功時に UI をダッシュボードへ切り替える。
+      async function doLogin() {
+        const userEl = document.getElementById("user"),
+          passEl = document.getElementById("password");
+        try {
+          const res = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: userEl.value,
+              password: passEl.value,
+            }),
+          });
+          if (!res.ok) throw new Error("ログインに失敗しました");
+          token = (await res.json()).token;
 
-        // MARK: executeContainerAction()
-        // ユーザーの承認を受け、バックエンドのコンテナ操作 API に対して認証済みのリクエストを発行する。
-        async function executeContainerAction(action) {
-            try {
-                const res = await fetch(`/api/container/${action}?id=${selectedId}`, { 
-                    method: 'POST', 
-                    headers: { 'Authorization': token } 
-                });
-                if (!res.ok) throw new Error(`${action} に失敗しました`);
+          // 認証成功後はログイン画面を破棄し、管理画面の構築を開始する。
+          document.getElementById("login-screen").style.display = "none";
+          document.getElementById("app").style.display = "grid";
+          setTimeout(() => fitAddon.fit(), 100);
 
-                // Docker エンジンの状態変更（非同期）を考慮し、ステータスの再反映までに猶予を持たせる。
-                setTimeout(() => { fetchContainers(); loadInspectData(selectedId); }, 1000);
-            } catch (e) { alert(e.message); }
+          fetchContainers();
+          startContainerPolling();
+        } catch (e) {
+          alert(e.message);
         }
+      }
 
-        // MARK: doLogin()
-        // ログイン情報をサーバーへ送り、セッション維持用のトークンを受け取る。成功時に UI をダッシュボードへ切り替える。
-        async function doLogin() {
-            const userEl = document.getElementById('user'), passEl = document.getElementById('password');
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: userEl.value, password: passEl.value })
-                });
-                if (!res.ok) throw new Error("ログインに失敗しました");
-                token = (await res.json()).token;
+      // MARK: fetchContainers()
+      // 認可されたコンテナの一覧を取得し、サイドバーに動的に構築する。状態に応じて dot の色を切り替える。
+      async function fetchContainers() {
+        try {
+          const res = await fetch("/api/containers", {
+            headers: { Authorization: token },
+          });
+          const items = await res.json();
+          const listTarget = document.getElementById("list-target");
 
-                // 認証成功後はログイン画面を破棄し、管理画面の構築を開始する。
-                document.getElementById('login-screen').style.display = 'none';
-                document.getElementById('app').style.display = 'grid';
-                setTimeout(() => fitAddon.fit(), 100);
-                fetchContainers();
-            } catch (e) { alert(e.message); }
+          // 動的にリストを生成し、クリックイベントを紐づける。
+          listTarget.innerHTML = items
+            .map((c) => {
+              const cId = c.id || "";
+              const cName =
+                c.names && c.names[0] ? c.names[0].replace("/", "") : "Unknown";
+              const state = c.state || "";
+              const isActive = selectedId === cId ? "active" : "";
+              return `<div class="container-item ${isActive}" id="c-${cId || cName}" onclick="selectContainer('${cId}', '${cName}')">
+                        <div class="dot ${state === "running" ? "running" : ""}"></div>${cName}</div>`;
+            })
+            .join("");
+        } catch (e) {
+          console.error(e);
         }
+      }
 
-        // MARK: fetchContainers()
-        // 認可されたコンテナの一覧を取得し、サイドバーに動的に構築する。状態に応じて dot の色を切り替える。
-        async function fetchContainers() {
-            try {
-                const res = await fetch('/api/containers', { headers: { 'Authorization': token } });
-                const items = await res.json();
-                
-                // 動的にリストを生成し、クリックイベントを紐づける。
-                document.getElementById('list-target').innerHTML = items.map(c => {
-                    const cId = c.id || "";
-                    const cName = (c.names && c.names[0]) ? c.names[0].replace('/', '') : 'Unknown';
-                    const state = c.state || "";
-                    return `<div class="container-item ${selectedId === cId ? 'active' : ''}" id="c-${cId || cName}" onclick="selectContainer('${cId}', '${cName}')">
-                        <div class="dot ${state === 'running' ? 'running' : ''}"></div>${cName}</div>`;
-                }).join('');
-            } catch (e) { console.error(e); }
+      // --- 定期的な状態更新 ---
+      function startContainerPolling() {
+        if (containerListTimer) clearInterval(containerListTimer);
+        containerListTimer = setInterval(() => {
+          if (token) {
+            fetchContainers();
+            if (selectedId) loadInspectData(selectedId);
+          }
+        }, 5000);
+      }
+
+      // MARK: selectContainer()
+      // サイドバーでコンテナが選ばれた際、画面上のターゲットを切り出し、古いターミナル接続を安全に破棄する。
+      function selectContainer(id, name) {
+        // 重複選択時は再接続を避けるため早期リターン。
+        if (selectedId === id) return;
+        selectedId = id;
+        selectedName = name;
+
+        // 視覚的なフィードバックを即座に行う。
+        document
+          .querySelectorAll(".container-item")
+          .forEach((el) => el.classList.remove("active"));
+        const targetEl =
+          document.getElementById(`c-${id}`) ||
+          document.getElementById(`c-${name}`);
+        if (targetEl) targetEl.classList.add("active");
+
+        document.getElementById("term-name").innerText = `Console: ${name}`;
+        disconnectTerminal();
+        loadInspectData(id);
+      }
+
+      // MARK: toggleTermButtons()
+      // ターミナルの接続フェーズ（接続中 / 切断中）に合わせ、管理用ボタンの表示・非表示を切り替える。
+      function toggleTermButtons(connected) {
+        document.getElementById("term-controls").style.display = connected
+          ? "none"
+          : "flex";
+        document.getElementById("btn-disconnect").style.display = connected
+          ? "inline-block"
+          : "none";
+      }
+
+      // MARK: disconnectTerminal()
+      // WebSocket を閉じ、ターミナルのリセットと UI 状態の初期化を行う。
+      function disconnectTerminal() {
+        if (wsTerm) wsTerm.close();
+        if (wsStats) wsStats.close();
+        if (termDataListener) {
+          termDataListener.dispose();
+          termDataListener = null;
         }
+        term.reset();
+        currentTermMode = "";
+        document.getElementById("term-placeholder").style.display = "flex";
+        toggleTermButtons(false);
+        updateCommandBarState();
+      }
 
-        // MARK: selectContainer()
-        // サイドバーでコンテナが選ばれた際、画面上のターゲットを切り出し、古いターミナル接続を安全に破棄する。
-        function selectContainer(id, name) {
-            // 重複選択時は再接続を避けるため早期リターン。
-            if (selectedId === id) return;
-            selectedId = id; selectedName = name;
-            
-            // 視覚的なフィードバックを即座に行う。
-            document.querySelectorAll('.container-item').forEach(el => el.classList.remove('active'));
-            const targetEl = document.getElementById(`c-${id}`) || document.getElementById(`c-${name}`);
-            if (targetEl) targetEl.classList.add('active');
-            
-            document.getElementById('term-name').innerText = `Console: ${name}`;
-            disconnectTerminal();
-            loadInspectData(id);
+      // MARK: loadInspectData()
+      // コンテナの低レベル情報を再取得し、詳細パネルへ反映させる。
+      async function loadInspectData(id) {
+        try {
+          const res = await fetch(
+            `/api/container/inspect?id=${id || selectedName}`,
+            { headers: { Authorization: token } },
+          );
+          if (!res.ok) {
+            // IDが無効な場合（削除直後等）は UI をクリアして異常終了を避ける。
+            updateDetailUI(null);
+            return;
+          }
+          const info = await res.json();
+          updateDetailUI(info.Raw || info);
+        } catch (e) {}
+      }
+
+      // MARK: updateDetailUI()
+      // 詳細パネルの各ステータス、リソース統計用ゲージ、および操作ボタン（Start/Stop）を最新状態に同期する。
+      function updateDetailUI(info) {
+        const isRunning = info?.State?.Running;
+        const status = (info?.State?.Status || "MISSING").toUpperCase();
+
+        // コンテナが生存している場合のみ操作可能な要素（ボタン、コマンドバー等）を活性化させる。
+        document.getElementById("btn-start").style.display = isRunning
+          ? "none"
+          : "inline-block";
+        document.getElementById("btn-stop").style.display = isRunning
+          ? "inline-block"
+          : "none";
+        document.getElementById("control-divider").style.display =
+          isRunning || info ? "inline-block" : "none";
+
+        const controls = document.getElementById("term-controls");
+        controls.style.opacity = isRunning ? "1" : "0.3";
+        controls.style.pointerEvents = isRunning ? "auto" : "none";
+
+        document.getElementById("command-bar").style.display = isRunning
+          ? "flex"
+          : "none";
+
+        isRunningState = isRunning;
+
+        // 基本情報のレンダリング
+        document.getElementById("info-status").innerText = status;
+        document.getElementById("info-pid").innerText = info?.State?.Pid || "-";
+
+        const started = new Date(info?.State?.StartedAt);
+        document.getElementById("info-started").innerText = isNaN(started)
+          ? "-"
+          : started.toLocaleString();
+        const uptime = isNaN(started)
+          ? 0
+          : Math.floor((new Date() - started) / 1000 / 60);
+        document.getElementById("uptime-text").innerText = isRunning
+          ? `${uptime} mins`
+          : info
+            ? "Stopped"
+            : "Not Created";
+
+        // ネットワーク / マウント構成の反映
+        document.getElementById("info-netmode").innerText =
+          info?.HostConfig?.NetworkMode || "-";
+        document.getElementById("info-restart").innerText =
+          info?.HostConfig?.RestartPolicy?.Name || "-";
+        document.getElementById("info-autoremove").innerText = info?.HostConfig
+          ?.AutoRemove
+          ? "Yes"
+          : "No";
+
+        let p = "";
+        const pb = info?.HostConfig?.PortBindings || {};
+        for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
+        document.getElementById("info-ports").innerHTML = p || "none";
+
+        document.getElementById("info-mounts").innerHTML =
+          (info?.Mounts || [])
+            .map(
+              (m) =>
+                `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`,
+            )
+            .join("") || "none";
+
+        // 統計データのポーリングは明示的なアクション（Terminal接続等）に合わせるためここでは行わない。
+        if (!isRunning && wsStats) wsStats.close();
+      }
+
+      // MARK: connectTerminal()
+      // WebSocket を介して、コンテナのログストリームまたは双方向 Exec シェルに接続する。
+      function connectTerminal(mode) {
+        if (!selectedId) return;
+        disconnectTerminal();
+        currentTermMode = mode;
+        document.getElementById("term-placeholder").style.display = "none";
+
+        // 統計データのポーリングも同時に開始する。
+        startStats(selectedId);
+
+        // 接続試行。 token による認証をクエリパラメータ経由で付与。
+        // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
+        wsTerm = new WebSocket(
+          `ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}&tail=${logTailCount}`,
+        );
+        wsTerm.binaryType = "arraybuffer";
+
+        wsTerm.onopen = () => {
+          fitAddon.fit();
+          term.focus();
+          toggleTermButtons(true);
+          if (mode === "logs")
+            term.write("\x1b[33m--- Tail Logs (Streaming) ---\x1b[0m\r\n");
+          updateCommandBarState();
+        };
+        // 生データ（ANSIコード含む）を受信し、仮想端末へ描画。
+        wsTerm.onmessage = (e) => term.write(new Uint8Array(e.data));
+        wsTerm.onclose = () => {
+          toggleTermButtons(false);
+          updateCommandBarState();
+        };
+        wsTerm.onerror = () => {
+          toggleTermButtons(false);
+          updateCommandBarState();
+        };
+
+        // 仮想端末への直接入力は原則禁止し、コマンドバーを通じた意図的な送信のみを許可する設計。
+        termDataListener = term.onData((data) => {});
+      }
+
+      // MARK: startStats()
+      // CPU / メモリ消費量データを WebSocket で購読し、UI 上の進捗バーを駆動させる。
+      function startStats(id) {
+        if (wsStats) wsStats.close();
+        wsStats = new WebSocket(
+          `ws://${location.host}/ws/stats?id=${id}&token=${token}`,
+        );
+        wsStats.onmessage = async (e) => {
+          try {
+            const s = JSON.parse(
+              e.data instanceof Blob ? await e.data.text() : e.data,
+            );
+
+            // デルタ計算を行い、全コア平均の CPU 使用率をパーセント表記に変換。
+            const cpuDelta =
+              s.cpu_stats.cpu_usage.total_usage -
+              s.precpu_stats.cpu_usage.total_usage;
+            const sysDelta =
+              s.cpu_stats.system_cpu_usage - s.precpu_stats.system_cpu_usage;
+            const cpu =
+              sysDelta > 0
+                ? (
+                    (cpuDelta / sysDelta) *
+                    100 *
+                    s.cpu_stats.online_cpus
+                  ).toFixed(2)
+                : 0;
+
+            const memUsed = (s.memory_stats.usage / 1024 / 1024).toFixed(1);
+            const memPct = (
+              (s.memory_stats.usage / s.memory_stats.limit) *
+              100
+            ).toFixed(1);
+
+            document.getElementById("cpu-text").innerText = `${cpu}%`;
+            document.getElementById("cpu-bar").style.width =
+              `${Math.min(cpu, 100)}%`;
+            document.getElementById("mem-text").innerText = `${memUsed} MiB`;
+            document.getElementById("mem-bar").style.width = `${memPct}%`;
+          } catch (err) {}
+        };
+      }
+
+      // MARK: sendCommand()
+      // テキスト入力されたコマンドを、現在の操作モード（API経由のstdin、またはWs経由のExec）に応じて適切に転送する。
+      async function sendCommand() {
+        const input = document.getElementById("command-input");
+        const content = input.value;
+        if (!content || !selectedId) return;
+
+        // ターミナルが解釈可能にするため、末尾の改行コードを担保する。
+        const cmd = content.endsWith("\n") ? content : content + "\n";
+
+        try {
+          if (currentTermMode === "exec" && wsTerm?.readyState === 1) {
+            // Exec セッション接続中は、既に開いている WebSocket に相乗りして高速に送信する。
+            wsTerm.send(cmd);
+          } else {
+            // 通常時またはログ表示中は、都度 API サーバーを叩いて stdin へインジェクションする（オーバーヘッドはあるが確実）。
+            const res = await fetch(`/api/container/cmd?id=${selectedId}`, {
+              method: "POST",
+              headers: {
+                Authorization: token,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ command: cmd }),
+            });
+            if (!res.ok) throw new Error("コマンドの送信に失敗しました");
+          }
+          input.value = "";
+          input.style.height = "32px";
+        } catch (e) {
+          alert(e.message);
         }
-
-        // MARK: toggleTermButtons()
-        // ターミナルの接続フェーズ（接続中 / 切断中）に合わせ、管理用ボタンの表示・非表示を切り替える。
-        function toggleTermButtons(connected) {
-            document.getElementById('term-controls').style.display = connected ? 'none' : 'flex';
-            document.getElementById('btn-disconnect').style.display = connected ? 'inline-block' : 'none';
-        }
-
-        // MARK: disconnectTerminal()
-        // WebSocket を閉じ、ターミナルのリセットと UI 状態の初期化を行う。
-        function disconnectTerminal() {
-            if (wsTerm) wsTerm.close();
-            if (wsStats) wsStats.close();
-            if (termDataListener) { termDataListener.dispose(); termDataListener = null; }
-            term.reset();
-            currentTermMode = "";
-            document.getElementById('term-placeholder').style.display = 'flex';
-            toggleTermButtons(false);
-            updateCommandBarState();
-        }
-
-        // MARK: loadInspectData()
-        // コンテナの低レベル情報を再取得し、詳細パネルへ反映させる。
-        async function loadInspectData(id) {
-            try {
-                const res = await fetch(`/api/container/inspect?id=${id || selectedName}`, { headers: { 'Authorization': token } });
-                if (!res.ok) {
-                    // IDが無効な場合（削除直後等）は UI をクリアして異常終了を避ける。
-                    updateDetailUI(null);
-                    return;
-                }
-                const info = await res.json();
-                updateDetailUI(info.Raw || info);
-            } catch (e) { }
-        }
-
-        // MARK: updateDetailUI()
-        // 詳細パネルの各ステータス、リソース統計用ゲージ、および操作ボタン（Start/Stop）を最新状態に同期する。
-        function updateDetailUI(info) {
-            const isRunning = info?.State?.Running;
-            const status = (info?.State?.Status || "MISSING").toUpperCase();
-
-            // コンテナが生存している場合のみ操作可能な要素（ボタン、コマンドバー等）を活性化させる。
-            document.getElementById('btn-start').style.display = isRunning ? 'none' : 'inline-block';
-            document.getElementById('btn-stop').style.display = isRunning ? 'inline-block' : 'none';
-            document.getElementById('control-divider').style.display = isRunning || info ? 'inline-block' : 'none';
-            
-            const controls = document.getElementById('term-controls');
-            controls.style.opacity = isRunning ? '1' : '0.3';
-            controls.style.pointerEvents = isRunning ? 'auto' : 'none';
-
-            document.getElementById('command-bar').style.display = isRunning ? 'flex' : 'none';
-
-            isRunningState = isRunning;
-
-            // 基本情報のレンダリング
-            document.getElementById('info-status').innerText = status;
-            document.getElementById('info-pid').innerText = info?.State?.Pid || "-";
-            
-            const started = new Date(info?.State?.StartedAt);
-            document.getElementById('info-started').innerText = isNaN(started) ? "-" : started.toLocaleString();
-            const uptime = isNaN(started) ? 0 : Math.floor((new Date() - started) / 1000 / 60);
-            document.getElementById('uptime-text').innerText = isRunning ? `${uptime} mins` : (info ? "Stopped" : "Not Created");
-
-            // ネットワーク / マウント構成の反映
-            document.getElementById('info-netmode').innerText = info?.HostConfig?.NetworkMode || "-";
-            document.getElementById('info-restart').innerText = info?.HostConfig?.RestartPolicy?.Name || "-";
-            document.getElementById('info-autoremove').innerText = info?.HostConfig?.AutoRemove ? "Yes" : "No";
-
-            let p = ""; const pb = info?.HostConfig?.PortBindings || {};
-            for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
-            document.getElementById('info-ports').innerHTML = p || "none";
-            
-            document.getElementById('info-mounts').innerHTML = (info?.Mounts || []).map(m =>
-                `<div style="margin-bottom:4px; border-bottom:1px solid #333;"><span style="color:var(--accent)">${m.Destination}</span><br>Type: ${m.Type}</div>`
-            ).join('') || "none";
-
-            // 統計データのポーリングは明示的なアクション（Terminal接続等）に合わせるためここでは行わない。
-            if (!isRunning && wsStats) wsStats.close();
-        }
-
-        // MARK: connectTerminal()
-        // WebSocket を介して、コンテナのログストリームまたは双方向 Exec シェルに接続する。
-        function connectTerminal(mode) {
-            if (!selectedId) return;
-            disconnectTerminal();
-            currentTermMode = mode;
-            document.getElementById('term-placeholder').style.display = 'none';
-
-            // 統計データのポーリングも同時に開始する。
-            startStats(selectedId);
-
-            // 接続試行。 token による認証をクエリパラメータ経由で付与。
-            // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
-            wsTerm = new WebSocket(`ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}&tail=${logTailCount}`);
-            wsTerm.binaryType = 'arraybuffer';
-
-            wsTerm.onopen = () => {
-                fitAddon.fit();
-                term.focus(); 
-                toggleTermButtons(true);
-                if (mode === 'logs') term.write('\x1b[33m--- Tail Logs (Streaming) ---\x1b[0m\r\n');
-                updateCommandBarState();
-            };
-            // 生データ（ANSIコード含む）を受信し、仮想端末へ描画。
-            wsTerm.onmessage = (e) => term.write(new Uint8Array(e.data));
-            wsTerm.onclose = () => { toggleTermButtons(false); updateCommandBarState(); };
-            wsTerm.onerror = () => { toggleTermButtons(false); updateCommandBarState(); };
-
-            // 仮想端末への直接入力は原則禁止し、コマンドバーを通じた意図的な送信のみを許可する設計。
-            termDataListener = term.onData(data => { });
-        }
-
-        // MARK: startStats()
-        // CPU / メモリ消費量データを WebSocket で購読し、UI 上の進捗バーを駆動させる。
-        function startStats(id) {
-            if (wsStats) wsStats.close();
-            wsStats = new WebSocket(`ws://${location.host}/ws/stats?id=${id}&token=${token}`);
-            wsStats.onmessage = async (e) => {
-                try {
-                    const s = JSON.parse((e.data instanceof Blob) ? await e.data.text() : e.data);
-                    
-                    // デルタ計算を行い、全コア平均の CPU 使用率をパーセント表記に変換。
-                    const cpuDelta = (s.cpu_stats.cpu_usage.total_usage - s.precpu_stats.cpu_usage.total_usage);
-                    const sysDelta = (s.cpu_stats.system_cpu_usage - s.precpu_stats.system_cpu_usage);
-                    const cpu = sysDelta > 0 ? ((cpuDelta / sysDelta) * 100 * s.cpu_stats.online_cpus).toFixed(2) : 0;
-                    
-                    const memUsed = (s.memory_stats.usage / 1024 / 1024).toFixed(1);
-                    const memPct = (s.memory_stats.usage / s.memory_stats.limit * 100).toFixed(1);
-                    
-                    document.getElementById('cpu-text').innerText = `${cpu}%`;
-                    document.getElementById('cpu-bar').style.width = `${Math.min(cpu, 100)}%`;
-                    document.getElementById('mem-text').innerText = `${memUsed} MiB`;
-                    document.getElementById('mem-bar').style.width = `${memPct}%`;
-                } catch (err) { }
-            };
-        }
-
-        // MARK: sendCommand()
-        // テキスト入力されたコマンドを、現在の操作モード（API経由のstdin、またはWs経由のExec）に応じて適切に転送する。
-        async function sendCommand() {
-            const input = document.getElementById('command-input');
-            const content = input.value;
-            if (!content || !selectedId) return;
-
-            // ターミナルが解釈可能にするため、末尾の改行コードを担保する。
-            const cmd = content.endsWith('\n') ? content : content + '\n';
-
-            try {
-                if (currentTermMode === 'exec' && wsTerm?.readyState === 1) {
-                    // Exec セッション接続中は、既に開いている WebSocket に相乗りして高速に送信する。
-                    wsTerm.send(cmd);
-                } else {
-                    // 通常時またはログ表示中は、都度 API サーバーを叩いて stdin へインジェクションする（オーバーヘッドはあるが確実）。
-                    const res = await fetch(`/api/container/cmd?id=${selectedId}`, {
-                        method: 'POST',
-                        headers: { 'Authorization': token, 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ command: cmd })
-                    });
-                    if (!res.ok) throw new Error("コマンドの送信に失敗しました");
-                }
-                input.value = ""; 
-                input.style.height = '32px'; 
-            } catch (e) { alert(e.message); }
-        }
+      }
     </script>
-</body>
-
+  </body>
 </html>
