@@ -137,7 +137,7 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 						for _, rawPayload := range rule.Webhook {
 							// プレースホルダーの置換を再帰的に実行
 							payload := replacePlaceholders(rawPayload, matches)
-							m.sendWebhook(webhookURL, payload)
+							m.executeWebhook(webhookURL, payload)
 						}
 						break
 					}
