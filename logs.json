@@ -1,131 +1,192 @@
 [
   {
     "comment": "サーバー起動開始",
-    "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (Starting minecraft server version .*)"
-    ],
-    "action": "bypass",
-    "command": "server_starting"
+    "regexp": [".+?]: (Starting minecraft server version .*)"],
+    "webhook": [
+      {
+        "content": "$1"
+      },
+      {
+        "embeds": [
+          {
+            "title": "Server has starting...",
+            "color": 16429359
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "サーバー起動",
-    "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (Done \\(.+?s\\)! For help, type \"help\")"
-    ],
-    "type": "server_started",
-    "webhook": {
-      "content": "$1",
-      "username": "Server"
-    }
+    "regexp": [".+?]: (Done \\(.+?s\\)! For help, type \"help\")"],
+    "webhook": [
+      {
+        "content": "$1"
+      },
+      {
+        "embeds": [
+          {
+            "title": "Server has started!",
+            "color": 7258631
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "サーバー停止開始",
-    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: (Stopping server)"],
-    "type": "server_stopping",
-    "webhook": {
-      "content": "$1",
-      "username": "Server"
-    }
+    "regexp": [".+?]: (Stopping server)"],
+    "webhook": [
+      {
+        "content": "$1"
+      },
+      {
+        "embeds": [
+          {
+            "title": "Server has stopping...",
+            "color": 16429359
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "ワールド保存",
-    "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: ThreadedAnvilChunkStorage: (All dimensions are saved)"
-    ],
-    "type": "server_save",
-    "webhook": {
-      "content": "$1",
-      "username": "Server"
-    }
+    "regexp": [".+?]: ThreadedAnvilChunkStorage: (All dimensions are saved)"],
+    "webhook": [
+      {
+        "content": "$1"
+      },
+      {
+        "embeds": [
+          {
+            "title": "Server has saved!",
+            "color": 7258631
+          }
+        ]
+      }
+    ]
   },
   {
-    "comment": "Join",
-    "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (joined the game)"
-    ],
-    "type": "player",
-    "webhook": {
-      "content": "",
-      "username": "**$1** $2"
-    }
+    "comment": "Player Join",
+    "regexp": [".+?]: (.+?) joined the game"],
+    "webhook": [
+      {
+        "embeds": [
+          {
+            "author": {
+              "icon_url": "https://minotar.net/helm/$1",
+              "name": "$1 joined the game"
+            },
+            "color": 10070709
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "Left",
-    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (left the game)"],
-    "type": "player",
-    "webhook": {
-      "content": "",
-      "username": "**$1** $2"
-    }
+    "regexp": [".+?]: (.+?) left the game"],
+    "webhook": [
+      {
+        "embeds": [
+          {
+            "author": {
+              "icon_url": "https://minotar.net/helm/$1",
+              "name": "$1 left the game"
+            },
+            "color": 10070709
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "Advancement",
     "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (has made the advancement .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.+?) (has completed the challenge .*)"
+      ".+?]: (.+?) (has made the advancement .*)",
+      ".+?]: (.+?) (has completed the challenge .*)"
     ],
-    "type": "player",
-    "webhook": {
-      "content": "",
-      "username": "**$1** $2"
-    }
+    "webhook": [
+      {
+        "embeds": [
+          {
+            "author": {
+              "icon_url": "https://minotar.net/helm/$1",
+              "name": "$1 $2"
+            },
+            "color": 10070709
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "Chat",
-    "regexp": ["\\[.+?\\] \\[Server thread/INFO\\].*?: <(.+?)> (.*)"],
-    "type": "message",
-    "webhook": {
-      "content": "$2",
-      "username": "$1"
-    }
+    "regexp": [".+?]: <(.+?)> (.*)"],
+    "webhook": [
+      {
+        "username": "$1",
+        "avatar_url": "https://minotar.net/helm/$1",
+        "content": "$2"
+      }
+    ]
   },
   {
     "comment": "Death",
     "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (was.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (fell.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (went.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (walked into .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (drowned.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (died.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (blew up)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (hit the ground .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (experienced kinetic energy.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (fell from a high place)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (froze to death)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (discovered the floor was lava)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (suffocated in a wall.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (tried to swim in lava.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (burned to death)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (left the confines of this world.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (didn't want to live in the same world as .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (starved to death.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20}) (withered away.*)"
+      ".+?]: (.+?) (was.*)",
+      ".+?]: (.+?) (fell.*)",
+      ".+?]: (.+?) (went.*)",
+      ".+?]: (.+?) (walked into .*)",
+      ".+?]: (.+?) (drowned.*)",
+      ".+?]: (.+?) (died.*)",
+      ".+?]: (.+?) (blew up)",
+      ".+?]: (.+?) (hit the ground .*)",
+      ".+?]: (.+?) (experienced kinetic energy.*)",
+      ".+?]: (.+?) (fell from a high place)",
+      ".+?]: (.+?) (froze to death)",
+      ".+?]: (.+?) (discovered the floor was lava)",
+      ".+?]: (.+?) (suffocated in a wall.*)",
+      ".+?]: (.+?) (tried to swim in lava.*)",
+      ".+?]: (.+?) (burned to death)",
+      ".+?]: (.+?) (left the confines of this world.*)",
+      ".+?]: (.+?) (didn't want to live in the same world as .*)",
+      ".+?]: (.+?) (starved to death.*)",
+      ".+?]: (.+?) (withered away.*)"
     ],
-    "type": "death",
-    "webhook": {
-      "content": "",
-      "username": "**$1** $2"
-    }
+    "webhook": [
+      {
+        "embeds": [
+          {
+            "author": {
+              "icon_url": "https://minotar.net/helm/$1",
+              "name": "$1 $2"
+            },
+            "color": 10070709
+          }
+        ]
+      }
+    ]
   },
   {
     "comment": "Other",
     "regexp": [
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*default to:.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*now set to:.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*server operator.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*to the whitelist.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*from the whitelist.*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*\\[Server\\] .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.*\\[Rcon\\] .*)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: Server closed)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: Timed out)",
-      "\\[.+?\\] \\[Server thread/INFO\\].*?: (.{3,20} lost connection: You logged in from another location)"
+      ".+?]: (.*default to:.*)",
+      ".+?]: (.*now set to:.*)",
+      ".+?]: (.*server operator.*)",
+      ".+?]: (.*to the whitelist.*)",
+      ".+?]: (.*from the whitelist.*)",
+      ".+?]: (.*\\[Server\\] .*)",
+      ".+?]: (.*\\[Rcon\\] .*)",
+      ".+?]: (.+? lost connection: Server closed)",
+      ".+?]: (.+? lost connection: Timed out)",
+      ".+?]: (.+? lost connection: You logged in from another location)"
     ],
-    "type": "bypass",
-    "webhook": {
-      "content": "$1",
-      "username": "Server"
-    }
+    "webhook": [
+      {
+        "content": "$1"
+      }
+    ]
   }
 ]

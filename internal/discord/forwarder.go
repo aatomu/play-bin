@@ -2,6 +2,7 @@ package discord
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -20,17 +21,9 @@ import (
 // MARK: LogRule
 // コンテナログから特定のパターンを検出し、Webhookへ転送するためのルール定義。
 type LogRule struct {
-	Comment string         `json:"comment"`
-	Regexp  []string       `json:"regexp"`
-	Type    string         `json:"type"`
-	Webhook WebhookMapping `json:"webhook"`
+	Regexp  []string         `json:"regexp"`
+	Webhook []map[string]any `json:"webhook"`
 	Res     []*regexp.Regexp
-}
-
-type WebhookMapping struct {
-	Content   string `json:"content"`
-	Username  string `json:"username"`
-	AvatarURL string `json:"avatar_url"`
 }
 
 // ログルールの読み込み状態を保持するキャッシュ構造体。
@@ -139,18 +132,13 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 					if re.MatchString(line) {
 						// マッチした場合、正規表現のキャプチャを活用した置換処理を行い、メッセージを構築する。
 						matches := re.FindStringSubmatch(line)
-						content := rule.Webhook.Content
-						username := rule.Webhook.Username
-						avatarURL := rule.Webhook.AvatarURL
 
-						for i, match := range matches {
-							p := fmt.Sprintf("$%d", i)
-							content = strings.ReplaceAll(content, p, match)
-							username = strings.ReplaceAll(username, p, match)
-							avatarURL = strings.ReplaceAll(avatarURL, p, match)
+						// JSONで定義された複数のWebhookメッセージを順次処理
+						for _, rawPayload := range rule.Webhook {
+							// プレースホルダーの置換を再帰的に実行
+							payload := replacePlaceholders(rawPayload, matches)
+							m.sendWebhook(webhookURL, payload)
 						}
-
-						m.executeWebhook(webhookURL, username, content, avatarURL)
 						break
 					}
 				}
@@ -233,31 +221,48 @@ func loadLogRules(path string) ([]LogRule, error) {
 	return rules, nil
 }
 
-// MARK: executeWebhook()
-// 生成されたペイロードを Discord Webhook API へ POST し、ログ内容をチャンネルへ配信する。
-func (m *BotManager) executeWebhook(webhookURL, user, content, avatar string) {
-	payload := map[string]string{
-		"content":    content,
-		"username":   user,
-		"avatar_url": avatar,
+// replacePlaceholders は map や slice 内の文字列にある $1, $2 などを再帰的に置換します。
+func replacePlaceholders(data any, matches []string) any {
+	switch v := data.(type) {
+	case string:
+		for i, match := range matches {
+			placeholder := fmt.Sprintf("$%d", i)
+			v = strings.ReplaceAll(v, placeholder, match)
+		}
+		return v
+	case map[string]any:
+		newMap := make(map[string]any)
+		for k, val := range v {
+			newMap[k] = replacePlaceholders(val, matches)
+		}
+		return newMap
+	case []any:
+		newSlice := make([]any, len(v))
+		for i, val := range v {
+			newSlice[i] = replacePlaceholders(val, matches)
+		}
+		return newSlice
+	default:
+		return v
 	}
+}
 
-	jsonData, err := json.Marshal(payload)
+func (m *BotManager) executeWebhook(webhook string, body any) {
+	b, err := json.Marshal(body)
 	if err != nil {
-		logger.Logf("Internal", "Discord", "Webhookペイロードの生成に失敗: %v", err)
+		logger.Logf("Internal", "Discord", "Webhook JSON変換失敗: %v", err)
 		return
 	}
 
-	// 外部 API との通信。非同期実行が望ましいが、順序性を考慮しストリームスキャンと同スレッドで行う。
-	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(jsonData)))
+	req, err := http.NewRequest(http.MethodPost, webhook, bytes.NewBuffer(b))
 	if err != nil {
-		// ネットワーク障害等は外部要因（External）として記録する。
-		logger.Logf("External", "Discord", "Webhook送信失敗: %v", err)
 		return
 	}
-	defer resp.Body.Close()
+	req.Header.Set("Content-Type", "application/json")
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		logger.Logf("External", "Discord", "Webhook送信エラー (HTTP %d)", resp.StatusCode)
+	// 非同期で送るか、タイムアウトを設定したクライアントを推奨
+	resp, err := http.DefaultClient.Do(req)
+	if err == nil {
+		resp.Body.Close()
 	}
 }
