@@ -148,44 +148,92 @@ graph TD
 ## E. データ構成
 
 ```mermaid
-graph LR
-    Root[("Project Root")]
+graph TD
+    Root[("play-bin/")]
 
-    subgraph "Configuration & Assets"
-        Config["config.json"]
-        CfgEg["config.example.json"]
-        HostKey["sftp_host_key"]
-        HostKeyPub["sftp_host_key.pub"]
-        WebIndex["index.html"]
-    end
-
-    subgraph "Source Code"
-        MainGo["main.go"]
-
-        subgraph "Internal Packages"
-            API["internal/api/"]
-            ConfigPkg["internal/config/"]
-            Container["internal/container/"]
-            Discord["internal/discord/"]
-            Docker["internal/docker/"]
-            Logger["internal/logger/"]
-            SFTP["internal/sftp/"]
-        end
-    end
+    %% Configuration & Local Data
+    Config["config.json"]
+    ConfigEx["config.example.json"]
+    LogFile["logs.json"]
+    HostKey["sftp_host_key"]
+    HostKeyPub["sftp_host_key.pub"]
+    License["LICENSE"]
+    Readme["README.md"]
+    GoMod["go.mod"]
+    GoSum["go.sum"]
 
     Root --> Config
-    Root --> CfgEg
+    Root --> ConfigEx
+    Root --> LogFile
     Root --> HostKey
     Root --> HostKeyPub
-    Root --> WebIndex
-    Root --> MainGo
-    Root --> Internal Packages
+    Root --> License
+    Root --> Readme
+    Root --> GoMod
+    Root --> GoSum
 
-    MainGo -.-> API
-    MainGo -.-> ConfigPkg
-    MainGo -.-> Container
-    MainGo -.-> Discord
-    MainGo -.-> Docker
-    MainGo -.-> Logger
-    MainGo -.-> SFTP
+    %% Frontend Assets
+    IndexHTML["index.html"]
+    Root --> IndexHTML
+
+    %% Source Code
+    MainGo["main.go"]
+    Root --> MainGo
+
+    %% Internal Packages
+    Internal["internal/"]
+    Root --> Internal
+
+    API["api/"]
+    Internal --> API
+    APIAuth["auth.go"]
+    APIContainers["handlers_containers.go"]
+    APIWS["handlers_ws.go"]
+    APIMiddleware["middleware.go"]
+    APIServer["server.go"]
+    API --> APIAuth
+    API --> APIContainers
+    API --> APIWS
+    API --> APIMiddleware
+    API --> APIServer
+
+    ConfigPkg["config/"]
+    Internal --> ConfigPkg
+    ConfigGo["config.go"]
+    ConfigPkg --> ConfigGo
+
+    Container["container/"]
+    Internal --> Container
+    ContainerGo["container.go"]
+    Container --> ContainerGo
+
+    Discord["discord/"]
+    Internal --> Discord
+    DiscordBot["bot.go"]
+    DiscordFwd["forwarder.go"]
+    DiscordSvc["service.go"]
+    Discord --> DiscordBot
+    Discord --> DiscordFwd
+    Discord --> DiscordSvc
+
+    DockerPkg["docker/"]
+    Internal --> DockerPkg
+    DockerGo["docker.go"]
+    DockerPkg --> DockerGo
+
+    Logger["logger/"]
+    Internal --> Logger
+    LoggerGo["logger.go"]
+    Logger --> LoggerGo
+
+    SFTP["sftp/"]
+    Internal --> SFTP
+    SFTPServer["server.go"]
+    SFTP --> SFTPServer
+
+    %% Other Directories
+    DockerDir["docker/"]
+    Root --> DockerDir
+    Dockerfile["template.dockerfile"]
+    DockerDir --> Dockerfile
 ```
