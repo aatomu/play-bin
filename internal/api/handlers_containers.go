@@ -15,9 +15,11 @@ import (
 
 // ContainerListItem はリスト表示用のコンテナ情報を表す。
 type ContainerListItem struct {
-	ID    string   `json:"id"`
-	Names []string `json:"names"`
-	State string   `json:"state"` // running, stopped, missing
+	ID          string   `json:"id"`
+	Names       []string `json:"names"`
+	State       string   `json:"state"`       // running, stopped, missing
+	Actions     []string `json:"actions"`     // Available actions based on permission and config
+	Permissions []string `json:"permissions"` // "read", "write", "execute"
 }
 
 // MARK: ListContainers()
@@ -58,10 +60,9 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 	processedDockerNames := make(map[string]bool)
 
 	// 1. 設定ファイルにあるサーバーを優先的に処理する。
-	// これにより、Docker上にまだコンテナが作成されていない場合でも「missing」としてリストに表示できる。
-	for serverName := range cfg.Servers {
-		// 権限がないサーバーはリスト自体に表示させないことで、セキュリティと使い勝手を両立する。
-		if !s.isAllowed(user, serverName) {
+	for serverName, serverCfg := range cfg.Servers {
+		// 権限がないサーバーはリスト自体に表示させない。
+		if !user.HasPermission(serverName, "read") {
 			continue
 		}
 
@@ -76,25 +77,49 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 		} else {
 			item.State = "missing"
 		}
+
+		// 利用可能なアクションを計算する
+		item.Actions = s.calculateActions(user, serverName, serverCfg)
+		// 権限リストも付与する（フロントエンドでのボタン制御用）
+		if user.HasPermission(serverName, "read") {
+			item.Permissions = append(item.Permissions, "read")
+		}
+		if user.HasPermission(serverName, "write") {
+			item.Permissions = append(item.Permissions, "write")
+		}
+		if user.HasPermission(serverName, "execute") {
+			item.Permissions = append(item.Permissions, "execute")
+		}
 		result = append(result, item)
 	}
 
 	// 2. 設定ファイルにはないが、Docker上に存在する（かつ権限のある）コンテナを追加する。
-	// 管理外のコンテナであっても、権限さえあれば操作を可能にするための柔軟な設計に基づいている。
 	for _, c := range containers {
 		if len(c.Names) == 0 {
 			continue
 		}
 		name := c.Names[0][1:]
-		if processedDockerNames[name] || !s.isAllowed(user, name) {
+		if processedDockerNames[name] || !user.HasPermission(name, "read") {
 			continue
 		}
 
-		result = append(result, ContainerListItem{
+		// 設定ファイルにないコンテナはアクションを持たない（制御不能）
+		item := ContainerListItem{
 			ID:    c.ID,
 			Names: c.Names,
 			State: c.State,
-		})
+		}
+		// 権限リストも付与
+		if user.HasPermission(name, "read") {
+			item.Permissions = append(item.Permissions, "read")
+		}
+		if user.HasPermission(name, "write") {
+			item.Permissions = append(item.Permissions, "write")
+		}
+		if user.HasPermission(name, "execute") {
+			item.Permissions = append(item.Permissions, "execute")
+		}
+		result = append(result, item)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -104,20 +129,30 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// MARK: isAllowed()
-// ユーザーが特定のコンテナ名に対する操作権限を持っているか検証する。
-func (s *Server) isAllowed(user config.UserConfig, name string) bool {
-	// 設定ミスなどで許可リストが未定義の場合は、安全を優先して拒否（Whitelist方式）する。
-	if user.Controllable == nil {
-		return false
+// MARK: calculateActions()
+// ユーザー権限とサーバー設定に基づいて、実行可能なアクションのリストを生成する。
+func (s *Server) calculateActions(user config.UserConfig, name string, cfg config.ServerConfig) []string {
+	// execute権限がない場合はアクションなし
+	if !user.HasPermission(name, "execute") {
+		return []string{}
 	}
-	for _, pattern := range user.Controllable {
-		// ワイルドカード指定または名前が完全一致する場合に許可する。
-		if pattern == "*" || pattern == name {
-			return true
-		}
+
+	var actions []string
+
+	// 設定ファイルに定義が存在する場合のみ追加
+	if cfg.Commands.Start != nil {
+		actions = append(actions, "start")
 	}
-	return false
+	if cfg.Commands.Stop != nil { // 停止定義があれば Stop と Kill を許可
+		actions = append(actions, "stop")
+		actions = append(actions, "kill")
+	}
+	if len(cfg.Commands.Backup) > 0 {
+		actions = append(actions, "backup")
+		actions = append(actions, "restore")
+	}
+
+	return actions
 }
 
 // MARK: InspectContainer()
@@ -143,6 +178,21 @@ func (s *Server) InspectContainer(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Action(action container.Action) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
+
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		s.WebSessionMu.RLock()
+		username := s.WebSessions[token]
+		s.WebSessionMu.RUnlock()
+
+		if !s.Config.Get().Users[username].HasPermission(id, "execute") {
+			logger.Logf("Client", "API", "Action拒否: user=%s, target=%s", username, id)
+			http.Error(w, "Execute permission required", http.StatusForbidden)
+			return
+		}
+
 		// 共通のマネージャーを介して非同期または連鎖的なアクション（停止前コマンド等）を実行する。
 		if err := s.ContainerManager.ExecuteAction(r.Context(), id, action); err != nil {
 			// アクションの失敗は、コンテナの状態不整合やリソース不足などの内部問題（Internal）として扱う。
@@ -159,6 +209,20 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 // コンテナの標準入力(stdin)に対してコマンドを送信する。
 func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 	id := r.URL.Query().Get("id")
+
+	token := r.Header.Get("Authorization")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	s.WebSessionMu.RLock()
+	username := s.WebSessions[token]
+	s.WebSessionMu.RUnlock()
+
+	if !s.Config.Get().Users[username].HasPermission(id, "write") {
+		logger.Logf("Client", "API", "Cmd拒否: user=%s, target=%s", username, id)
+		http.Error(w, "Write permission required", http.StatusForbidden)
+		return
+	}
 
 	// リクエストボディが不正な場合は、クライアント側の誤り（Client）として即座に返却する。
 	var payload struct {

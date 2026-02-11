@@ -27,9 +27,34 @@ type Config struct {
 }
 
 type UserConfig struct {
-	Discord      string   `json:"discord"`
-	Password     string   `json:"password"`
-	Controllable []string `json:"controllable"`
+	Discord     string              `json:"discord"`
+	Password    string              `json:"password"`
+	Permissions map[string][]string `json:"permissions"`
+}
+
+// HasPermission checks if the user has the specified permission for the given server.
+// It checks specific server permissions first, then wildcards.
+func (u UserConfig) HasPermission(serverName, perm string) bool {
+	if u.Permissions == nil {
+		return false
+	}
+	// Check specific server permissions
+	if perms, ok := u.Permissions[serverName]; ok {
+		for _, p := range perms {
+			if p == perm {
+				return true
+			}
+		}
+	}
+	// Check wildcard permissions
+	if perms, ok := u.Permissions["*"]; ok {
+		for _, p := range perms {
+			if p == perm {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type ServerConfig struct {
@@ -47,10 +72,10 @@ type NetworkConfig struct {
 }
 
 type CommandsConfig struct {
-	Start   StartConfig `json:"start"`
-	Stop    []CmdConfig `json:"stop"`
-	Backup  []CmdConfig `json:"backup"`
-	Message string      `json:"message"`
+	Start   *StartConfig `json:"start,omitempty"`
+	Stop    []CmdConfig  `json:"stop,omitempty"`
+	Backup  []CmdConfig  `json:"backup,omitempty"`
+	Message *string      `json:"message,omitempty"`
 }
 
 type StartConfig struct {

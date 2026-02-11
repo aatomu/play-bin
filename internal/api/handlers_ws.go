@@ -33,9 +33,30 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 			isTty = inspect.Config.Tty
 		}
 
+		// WebSocketハンドラーはAuthミドルウェアを経由しているが、Usernameは引き継がれないためトークンから再取得する。
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		s.WebSessionMu.RLock()
+		username := s.WebSessions[token]
+		s.WebSessionMu.RUnlock()
+		// ユーザーが存在しない場合（Auth通過後にセッション切れ等）はAuth側で弾かれるはずだが念のため
+		if username == "" {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		user := s.Config.Get().Users[username]
+
 		// 指定されたモードに応じて、適切なDockerストリームを初期化する。
 		switch mode {
 		case "exec":
+			if !user.HasPermission(id, "write") {
+				logger.Logf("Client", "API", "WS Exec拒否: user=%s, target=%s", username, id)
+				http.Error(w, "Write permission required", http.StatusForbidden)
+				return
+			}
 			// インタラクティブなシェル操作を提供するため、TTYを強制しつつ環境変数を最適化する。
 			isTty = true
 			cfg := ctypes.ExecOptions{
@@ -56,6 +77,11 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 			logger.Logf("Internal", "API", "Exec接続を開始しました: container=%s", id)
 
 		case "logs":
+			if !user.HasPermission(id, "read") {
+				logger.Logf("Client", "API", "WS Logs拒否: user=%s, target=%s", username, id)
+				http.Error(w, "Read permission required", http.StatusForbidden)
+				return
+			}
 			// コンテナの開始時からのログを、指定された行数（tail）分取得してストリームを開始する。
 			// 初期表示や無限スクロール時の重複読み込みを防ぐためのパラメータ。
 			tail := q.Get("tail")
@@ -139,6 +165,21 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 func (s *Server) StatsHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.URL.Query().Get("id")
+
+		token := r.Header.Get("Authorization")
+		if token == "" {
+			token = r.URL.Query().Get("token")
+		}
+		s.WebSessionMu.RLock()
+		username := s.WebSessions[token]
+		s.WebSessionMu.RUnlock()
+
+		user := s.Config.Get().Users[username]
+		if !user.HasPermission(id, "read") {
+			// 統計情報の取得はRead権限が必要
+			http.Error(w, "Read permission required", http.StatusForbidden)
+			return
+		}
 
 		ws, err := wsUpgrader.Upgrade(w, r, nil)
 		if err != nil {

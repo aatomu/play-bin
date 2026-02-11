@@ -201,15 +201,8 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 		return "", os.ErrPermission
 	}
 
-	// 指定されたコンテナに対し、このユーザーが操作を許可されているか（controllable）をホワイトリスト形式で検証。
-	allowed := false
-	for _, p := range user.Controllable {
-		if p == "*" || p == containerName {
-			allowed = true
-			break
-		}
-	}
-	if !allowed {
+	// 指定されたコンテナに対し、このユーザーが操作を許可されているか（read権限）を確認。
+	if !user.HasPermission(containerName, "read") {
 		// 権限のないアクセス試行は Client コンテキストで警告として記録。
 		logger.Logf("Client", "SFTP", "アクセス拒否: user=%s, path=%s", h.username, path)
 		return "", os.ErrPermission
@@ -256,14 +249,7 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			user := cfg.Users[h.username]
 			var items []os.FileInfo
 			for name := range cfg.Servers {
-				allowed := false
-				for _, p := range user.Controllable {
-					if p == "*" || p == name {
-						allowed = true
-						break
-					}
-				}
-				if allowed {
+				if user.HasPermission(name, "read") {
 					items = append(items, &vfsFileInfo{name: name, isDir: true})
 				}
 			}
@@ -312,6 +298,14 @@ func (h *vfsHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
 // MARK: Filewrite()
 // 物理ファイルへデータを上書き・追記する。マウント境界の外への脱出は不可。
 func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
+	// 書き込み操作には write 権限が必要
+	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
+	cfg := h.config.Get()
+	user := cfg.Users[h.username]
+	if !user.HasPermission(containerName, "write") {
+		return nil, os.ErrPermission
+	}
+
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
 		return nil, err
@@ -325,6 +319,14 @@ func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 // MARK: Filecmd()
 // ファイルの削除、フォルダ作成、名前変更等の「構成変更」コマンドを処理する。
 func (h *vfsHandler) Filecmd(r *sftp.Request) error {
+	// 変更操作には write 権限が必要
+	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
+	cfg := h.config.Get()
+	user := cfg.Users[h.username]
+	if !user.HasPermission(containerName, "write") {
+		return os.ErrPermission
+	}
+
 	fullPath, err := h.mapPath(r.Filepath)
 	if err != nil {
 		return err

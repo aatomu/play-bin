@@ -71,11 +71,13 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	}
 
 	// カスタムの起動コマンドが指定されている場合のみ、エントリポイントや引数を上書きする。
-	if e := server.Commands.Start.Entrypoint; e != "" {
-		containerConfig.Entrypoint = strings.Fields(e)
-	}
-	if a := server.Commands.Start.Arguments; a != "" {
-		containerConfig.Cmd = strings.Fields(a)
+	if server.Commands.Start != nil {
+		if e := server.Commands.Start.Entrypoint; e != "" {
+			containerConfig.Entrypoint = strings.Fields(e)
+		}
+		if a := server.Commands.Start.Arguments; a != "" {
+			containerConfig.Cmd = strings.Fields(a)
+		}
 	}
 
 	hostConfig := &ctypes.HostConfig{}
@@ -204,14 +206,28 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 	var hasError bool
 
 	// 整合性のあるバックアップを取得するため、事前に「保存」コマンド等を送信する必要があるかを確認する。
+	isRunning := false
+	if inspect, err := docker.Client.ContainerInspect(ctx, id); err == nil && inspect.State.Running {
+		isRunning = true
+	}
+
 	for _, cmd := range server.Commands.Backup {
 		switch cmd.Type {
 		case "attach":
+			// コンテナが起動していない場合は、stdinへのコマンド送信は失敗するためスキップする。
+			if !isRunning {
+				logger.Logf("Internal", "Container", "%s: コンテナ停止中のためバックアップ準備コマンド(attach)をスキップします", id)
+				continue
+			}
 			// ゲームサーバー等の「save-all」コマンドを想定し、ディスクへの同期を促す。
 			if err := docker.SendCommand(id, cmd.Arg+"\n"); err != nil {
 				logger.Logf("Internal", "Container", "%s: バックアップ準備コマンド送信失敗: %v", id, err)
 			}
 		case "sleep":
+			// コンテナが停止中の場合は待機も不要なためスキップする（時短）。
+			if !isRunning {
+				continue
+			}
 			// ディスク同期が完了するまでの待機時間。
 			if dur, err := time.ParseDuration(cmd.Arg); err == nil {
 				time.Sleep(dur)
@@ -263,9 +279,11 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		return fmt.Errorf("server %s not found in config", id)
 	}
 
-	// 復旧作業中のデータ競合を防ぐため、一旦コンテナを確実に停止させる。
-	timeout := 30
-	_ = docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{Timeout: &timeout})
+	// 復旧作業中のデータ競合を防ぐため、一旦コンテナを確実に停止させる必要がある。
+	// 起動中のコンテナに対するRestoreは危険なため、エラーとして拒否する。
+	if inspect, err := docker.Client.ContainerInspect(ctx, id); err == nil && inspect.State.Running {
+		return fmt.Errorf("container is running. please stop it before restore")
+	}
 
 	var hasError bool
 	for _, cmd := range server.Commands.Backup {

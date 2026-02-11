@@ -378,33 +378,6 @@
           <div class="term-header">
             <span id="term-name">Console: No Container Selected</span>
             <div class="btn-group">
-              <button
-                id="btn-start"
-                class="success"
-                onclick="confirmAction('start')"
-                style="display: none"
-              >
-                Start
-              </button>
-              <button
-                id="btn-stop"
-                class="danger"
-                onclick="confirmAction('stop')"
-                style="display: none"
-              >
-                Stop
-              </button>
-
-              <span
-                id="control-divider"
-                style="
-                  margin: 0 5px;
-                  border-left: 1px solid #444;
-                  height: 20px;
-                  display: none;
-                "
-              ></span>
-
               <span id="term-controls" style="display: flex; gap: 5px">
                 <button id="btn-exec" onclick="connectTerminal('exec')">
                   Exec
@@ -412,18 +385,28 @@
                 <button id="btn-logs" onclick="connectTerminal('logs')">
                   Tail Logs
                 </button>
-                <button id="btn-backup" onclick="confirmAction('backup')">
-                  Backup
-                </button>
-                <button id="btn-restore" onclick="confirmAction('restore')">
-                  Restore
-                </button>
-                <button
-                  id="btn-kill"
-                  class="danger"
-                  onclick="confirmAction('kill')"
+
+                <span style="width: 10px"></span>
+
+                <select
+                  id="action-select"
+                  style="
+                    padding: 6px;
+                    border-radius: 4px;
+                    background: #333;
+                    color: white;
+                    border: 1px solid #444;
+                    min-width: 100px;
+                  "
                 >
-                  Kill
+                  <option value="" disabled selected>Action...</option>
+                </select>
+                <button
+                  id="btn-execute-action"
+                  class="primary"
+                  onclick="confirmSelectedAction()"
+                >
+                  Execute
                 </button>
               </span>
 
@@ -553,6 +536,11 @@
       let isFetchingLogs = false; // 二重リクエスト防止
       let containerListTimer = null; // コンテナ一覧取得のポーリングタイマー
 
+      let actionMap = {}; // APIから取得したコンテナごとの利用可能アクション
+      let permissionMap = {}; // APIから取得したコンテナごとの権限 (read/write/execute)
+      let selectedActions = [];
+      let selectedPermissions = [];
+
       // ターミナル実体（xterm.js）の初期化。UI読み込み時に一度だけ実行され、基本的な外観とアドオン（Fit）を設定する。
       // 無限スクロールをサポートするため、scrollbackを十分に（10万行等）確保する。
       const term = new Terminal({
@@ -573,7 +561,9 @@
         const btn = document.getElementById("btn-send");
 
         // 接続かつ、操作モードである場合のみ送信を許可することで、誤送信によるエラーを防止する。
-        if (isConnected && currentTermMode) {
+        // また、write権限がない場合は入力を受け付けない。
+        const canWrite = selectedPermissions.includes("write");
+        if (isConnected && currentTermMode && canWrite) {
           input.disabled = false;
           input.placeholder =
             currentTermMode === "exec"
@@ -584,7 +574,9 @@
         } else {
           input.disabled = true;
           input.value = "";
-          input.placeholder = "Select a container and mode";
+          input.placeholder = !canWrite
+            ? "Write permission denied"
+            : "Select a container and mode";
           btn.style.opacity = "0.5";
           btn.style.pointerEvents = "none";
         }
@@ -652,6 +644,14 @@
           fitAddon.fit();
         } catch (e) {}
       });
+
+      // MARK: confirmSelectedAction()
+      function confirmSelectedAction() {
+        const select = document.getElementById("action-select");
+        const action = select.value;
+        if (!action) return;
+        confirmAction(action);
+      }
 
       // MARK: confirmAction()
       // ユーザーが実行ボタン等を押した際、誤操作によるシステム停止やデータ上書きを防ぐため、実行確認のダイアログを前面に表示する。
@@ -746,12 +746,25 @@
               const cId = c.id || "";
               const cName =
                 c.names && c.names[0] ? c.names[0].replace("/", "") : "Unknown";
+
+              // キャッシュを更新
+              actionMap[cId] = c.actions || [];
+              permissionMap[cId] = c.permissions || [];
+
               const state = c.state || "";
               const isActive = selectedId === cId ? "active" : "";
               return `<div class="container-item ${isActive}" id="c-${cId || cName}" onclick="selectContainer('${cId}', '${cName}')">
                         <div class="dot ${state === "running" ? "running" : ""}"></div>${cName}</div>`;
             })
             .join("");
+
+          // 現在選択中のコンテナがあれば、権限情報などを再同期する
+          if (selectedId) {
+            selectedActions = actionMap[selectedId] || [];
+            selectedPermissions = permissionMap[selectedId] || [];
+            updateActionDropdown();
+            updateCommandBarState();
+          }
         } catch (e) {
           console.error(e);
         }
@@ -786,8 +799,42 @@
         if (targetEl) targetEl.classList.add("active");
 
         document.getElementById("term-name").innerText = `Console: ${name}`;
+
+        // 権限とアクションの反映
+        selectedActions = actionMap[id] || [];
+        selectedPermissions = permissionMap[id] || [];
+
+        updateActionDropdown();
+
+        // 切断してUIリセット
         disconnectTerminal();
         loadInspectData(id);
+      }
+
+      function updateActionDropdown() {
+        const select = document.getElementById("action-select");
+        const btn = document.getElementById("btn-execute-action");
+
+        select.innerHTML =
+          '<option value="" disabled selected>Action...</option>';
+
+        if (selectedActions.length === 0) {
+          select.disabled = true;
+          btn.disabled = true;
+          btn.style.opacity = "0.5";
+          return;
+        }
+
+        select.disabled = false;
+        btn.disabled = false;
+        btn.style.opacity = "1";
+
+        selectedActions.forEach((a) => {
+          const opt = document.createElement("option");
+          opt.value = a;
+          opt.text = a.charAt(0).toUpperCase() + a.slice(1);
+          select.appendChild(opt);
+        });
       }
 
       // MARK: toggleTermButtons()
@@ -842,18 +889,33 @@
         const status = (info?.State?.Status || "MISSING").toUpperCase();
 
         // コンテナが生存している場合のみ操作可能な要素（ボタン、コマンドバー等）を活性化させる。
-        document.getElementById("btn-start").style.display = isRunning
-          ? "none"
-          : "inline-block";
-        document.getElementById("btn-stop").style.display = isRunning
-          ? "inline-block"
-          : "none";
-        document.getElementById("control-divider").style.display =
-          isRunning || info ? "inline-block" : "none";
-
+        // アクションボタン（旧Start/Stop）は廃止し、ドロップダウンに統合したため非表示制御は不要だが、
+        // コントロール自体の活性化制御を行う
         const controls = document.getElementById("term-controls");
-        controls.style.opacity = isRunning ? "1" : "0.3";
-        controls.style.pointerEvents = isRunning ? "auto" : "none";
+
+        // コンテナが起動中、または権限があるか等で細かく制御可能だが、一旦はRunningステータスと連動させる方針を維持しつつ、
+        // 停止中でもBackup/Start等は実行可能であるべき。
+        // したがって、infoが存在すればコントロールは有効化する（ただしボタン個別のAction定義に従う）。
+        const isExists = status !== "MISSING";
+
+        controls.style.opacity = isExists ? "1" : "0.3";
+        controls.style.pointerEvents = isExists ? "auto" : "none";
+
+        // ログなどのボタン制御
+        document.getElementById("btn-logs").disabled =
+          !selectedPermissions.includes("read");
+        document.getElementById("btn-exec").disabled =
+          !selectedPermissions.includes("write");
+        if (!selectedPermissions.includes("read")) {
+          document.getElementById("btn-logs").style.opacity = "0.5";
+        } else {
+          document.getElementById("btn-logs").style.opacity = "1";
+        }
+        if (!selectedPermissions.includes("write")) {
+          document.getElementById("btn-exec").style.opacity = "0.5";
+        } else {
+          document.getElementById("btn-exec").style.opacity = "1";
+        }
 
         document.getElementById("command-bar").style.display = isRunning
           ? "flex"

@@ -99,7 +99,7 @@ func (s *Server) Auth(next http.HandlerFunc) http.HandlerFunc {
 			}
 
 			// 認可チェック。指定されたコンテナ名が許可リストに含まれているか確認する。
-			if !s.isAllowed(user, realName) {
+			if !user.HasPermission(realName, "read") {
 				// 権限外の操作試行は重要な監視対象（Client）として記録する。
 				logger.Logf("Client", "Auth", "操作拒否: user=%s, target=%s", username, realName)
 				http.Error(w, "Operation not allowed for this container", http.StatusForbidden)

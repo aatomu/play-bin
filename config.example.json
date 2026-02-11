@@ -5,7 +5,9 @@
     "admin": {
       "discord": "123456789012345678",
       "password": "strongpassword",
-      "controllable": ["*"]
+      "permissions": {
+        "*": ["read", "write", "execute"]
+      }
     }
   },
   "servers": {

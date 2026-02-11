@@ -21,10 +21,10 @@ func main() {
 	// MARK: > Docker Client
 	// Dockerエンジンとの通信が確立できないと全ての操作が不可能になるため、最初期に検証する。
 	logger.Log("Internal", "System", "Dockerクライアントを初期化しています...")
+	// Dockerクライアントの初期化処理を修正
 	if err := docker.Init(); err != nil {
-		// 接続失敗時は続行不能と判断し、原因を明示してプロセスの起動を中断する。
+		// 接続失敗時はエラーをログに出力し、プロセスの起動を続行する。
 		logger.Error("System", err)
-		return
 	}
 	logger.Log("Internal", "System", "Dockerクライアントが準備完了しました")
 

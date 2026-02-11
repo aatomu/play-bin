@@ -49,13 +49,12 @@ func (s *Server) WithLogging(next http.Handler) http.Handler {
 
 		// 規約に基づき [timestamp] [level] [service]: message 形式でアクセス情報を出力する。
 		// クエリパラメータ (?id=...) を含めた完全なリクエスト内容を追跡するため RequestURI を使用する。
-		logger.Logf("Internal", "Access", "%s %s %s %d %v %s",
+		logger.Logf("Internal", "Access", "%s %s %s %d %v",
 			r.Method,
 			r.RequestURI,
 			r.RemoteAddr,
 			lrw.statusCode,
 			time.Since(start),
-			r.UserAgent(),
 		)
 	})
 }

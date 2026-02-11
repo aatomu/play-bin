@@ -172,15 +172,23 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 		userID = i.User.ID
 	}
 
-	// ユーザー情報と controllable リストを照合し、権限のない操作をブロックする。
+	// コマンド名から必要な権限を決定する。
+	var requiredPerm string
+	switch i.ApplicationCommandData().Name {
+	case "action":
+		requiredPerm = "execute"
+	case "cmd":
+		requiredPerm = "write"
+	default:
+		requiredPerm = "read"
+	}
+
+	// ユーザー情報と権限リストを照合し、権限のない操作をブロックする。
 	allowed := false
 	for _, user := range cfg.Users {
 		if user.Discord == userID {
-			for _, pat := range user.Controllable {
-				if pat == "*" || pat == serverName {
-					allowed = true
-					break
-				}
+			if user.HasPermission(serverName, requiredPerm) {
+				allowed = true
 			}
 			break
 		}
@@ -188,11 +196,11 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 
 	if !allowed {
 		// 権限のない操作試行は、クライアント起因の不正アクセス（Client）として記録する。
-		logger.Logf("Client", "Discord", "不正アクセス試行: user=%s, target=%s", userID, serverName)
+		logger.Logf("Client", "Discord", "不正アクセス試行: user=%s, target=%s, perm=%s", userID, serverName, requiredPerm)
 		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "あなたにはこのサーバーを操作する権限がありません。",
+				Content: fmt.Sprintf("あなたにはこのサーバーに対する %s 権限がありません。", requiredPerm),
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
@@ -256,11 +264,12 @@ func (m *BotManager) onMessageCreate(dg *discordgo.Session, msg *discordgo.Messa
 
 	cfg := m.Config.Get()
 	serverCfg := cfg.Servers[serverName]
-	template := serverCfg.Commands.Message
-	if template == "" {
+	templatePtr := serverCfg.Commands.Message
+	if templatePtr == nil || *templatePtr == "" {
 		// メッセージ自動送信が設定されていないサーバーの場合は終了。
 		return
 	}
+	template := *templatePtr
 
 	// 投稿者名と本文を埋め込み、コンテナ側のチャット欄等へ反映させる。
 	text := strings.ReplaceAll(template, "${user}", msg.Author.Username)

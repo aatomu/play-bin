@@ -52,11 +52,17 @@
   },
   {
     "comment": "ワールド保存",
-    "regexp": [".+?]: ThreadedAnvilChunkStorage: (All dimensions are saved)"],
+    "regexp": [".+?]: (ThreadedAnvilChunkStorage .* are saved)"],
     "webhook": [
       {
         "content": "$1"
-      },
+      }
+    ]
+  },
+  {
+    "comment": "ワールド保存",
+    "regexp": [".+?]: ThreadedAnvilChunkStorage: (All dimensions are saved)"],
+    "webhook": [
       {
         "embeds": [
           {
