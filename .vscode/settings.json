@@ -1,7 +1,9 @@
 {
     "cSpell.words": [
         "atomicwriter",
+        "autoremove",
         "cespare",
+        "cpus",
         "ctypes",
         "errdefs",
         "felixge",
@@ -10,11 +12,13 @@
         "logr",
         "moby",
         "morikuni",
+        "netmode",
         "newyear",
         "opencontainers",
         "otelhttp",
         "otlptrace",
         "otlptracehttp",
+        "precpu",
         "stdcopy",
         "stdr",
         "Upgrader",
