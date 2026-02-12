@@ -46,7 +46,7 @@ func (m *BotManager) SyncLogForwarders() {
 
 	for serverName, serverCfg := range cfg.Servers {
 		// LogSetting または Webhook が空の場合は、転送を意図していないと判断してスキップする。
-		if serverCfg.Discord.LogSetting == "" || serverCfg.Discord.Webhook == "" {
+		if serverCfg.Discord == nil || serverCfg.Discord.LogSetting == "" || serverCfg.Discord.Webhook == "" {
 			continue
 		}
 		activeServers[serverName] = true

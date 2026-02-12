@@ -41,6 +41,9 @@ func (m *BotManager) SyncBots() {
 
 	// 設定にある各サーバーから、有効なDiscordトークンとチャンネルIDの紐付けを抽出する。
 	for serverName, serverCfg := range cfg.Servers {
+		if serverCfg.Discord == nil {
+			continue
+		}
 		token := serverCfg.Discord.Token
 		if token == "" {
 			continue

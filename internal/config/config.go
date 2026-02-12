@@ -27,7 +27,7 @@ type Config struct {
 }
 
 type UserConfig struct {
-	Discord     string              `json:"discord"`
+	Discord     string              `json:"discord,omitempty"`
 	Password    string              `json:"password"`
 	Permissions map[string][]string `json:"permissions"`
 }
@@ -58,10 +58,10 @@ func (u UserConfig) HasPermission(serverName, perm string) bool {
 }
 
 type ServerConfig struct {
-	WorkingDir string         `json:"workingDir"`
+	WorkingDir string         `json:"workingDir,omitempty"`
 	Compose    *ComposeConfig `json:"compose,omitempty"`
 	Commands   CommandsConfig `json:"commands"`
-	Discord    DiscordConfig  `json:"discord"`
+	Discord    *DiscordConfig `json:"discord,omitempty"`
 }
 
 type ComposeConfig struct {
@@ -94,10 +94,10 @@ type CmdConfig struct {
 }
 
 type DiscordConfig struct {
-	Token      string `json:"token"`
-	Channel    string `json:"channel"`
-	Webhook    string `json:"webhook"`
-	LogSetting string `json:"logSetting"`
+	Token      string `json:"token,omitempty"`
+	Channel    string `json:"channel,omitempty"`
+	Webhook    string `json:"webhook,omitempty"`
+	LogSetting string `json:"logSetting,omitempty"`
 }
 
 // MARK: Get()

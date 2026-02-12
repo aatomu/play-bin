@@ -2,6 +2,123 @@
 
 Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDiscordから一括管理するためのツールです。
 
+## config.jsonについて
+
+`config.example.json`を`config.json`という名前でコピーし、環境に合わせて各項目を編集します。
+
+- `httpListen?: string` - Web UIを待機するアドレスとポート (省略時は無効)
+- `sftpListen?: string` - SFTPサーバーを待機するアドレスとポート (省略時は無効)
+- `users: map<username: string, UserConfig>` - ユーザー設定
+  - `discord?: string` - ユーザーのDiscord ID
+  - `password: string` - Web UIおよびSFTPログインに使用するパスワード
+  - `permissions: map<servername string, ("read" | "write" | "execute")[]>` - 操作権限の設定
+    `servername`に`*`を指定するとすべてのサーバーに対して権限を設定
+- `servers: map<servername string, ServerConfig>` - サーバー設定
+  - `workingDir?: string` - 作業ディレクトリ
+  - `compose?: Object` - コンテナ定義
+    - `image: string` - Dockerイメージ
+    - `command?: Object` - コンテナ起動コマンド
+      - `entrypoint?: string` - エントリーポイント
+      - `arguments?: string` - コマンド引数
+    - `restart?: "always"|"no"|"on-failure"|"unless-stopped"` - 再起動ポリシー
+      - `no`: コンテナが停止しても再起動しない(初期値)
+      - `always`: 必ず再起動する
+      - `on-failure`: コンテナが異常終了した場合に再起動する
+      - `unless-stopped`: コンテナが停止しても再起動する
+    - `network?: Object` - ネットワーク設定
+      - `mode: "host"|"bridge"` - ネットワークモード
+        - `host`: ホストネットワーク
+        - `bridge`: ブリッジネットワーク
+      - `mapping?: map<string, string>` - ポートマッピング
+    - `mount?: map<string, string>` - マウント設定 (ホストパス: コンテナパス)
+  - `commands: Object` - コマンド定義
+    - `stop?: CmdConfig[]` - 停止時に実行するコマンドリスト
+    - `backup?: CmdConfig[]` - バックアップ時に実行するコマンドリスト
+      - `type: "attach" | "exec" | "log" | "sleep" | "backup"` - コマンド種別
+        - `attach`: コンテナに接続
+        - `exec`: コンテナ内でコマンドを実行
+        - `log`: コンテナログを取得
+        - `sleep`: 指定時間待機
+        - `backup`: バックアップ
+      - `arg: string` - コマンド引数 (backup種別の場合は `src:destBase` 形式)
+    - `message?: string` - Discord通知メッセージのフォーマット
+  - `discord?: Object` - Discord設定
+    - `token?: string` - Discord Botトークン (channelとセット)
+    - `channel?: string` - DiscordチャンネルID (tokenとセット)
+    - `webhook?: string` - Discord Webhook URL (logSettingとセット)
+    - `logSetting?: string` - ログ設定ファイルのパス (webhookとセット)
+
+```json
+{
+  "httpListen": ":8080", //
+  "sftpListen": ":2022",
+  "users": {
+    "admin": {
+      "discord": "123456789012345678",
+      "password": "strongpassword",
+      "permissions": {
+        "*": ["read", "write", "execute"]
+      }
+    }
+  },
+  "servers": {
+    "minecraft-1": {
+      "workingDir": "/home/atomu/minecraft",
+      "compose": {
+        "image": "mc_java:21",
+        "command": {
+          "entrypoint": "java",
+          "arguments": "-Xms2G -Xmx2G -jar server.jar nogui"
+        },
+        "restart": "always",
+        "network": {
+          "mode": "bridge",
+          "mapping": {
+            "25565": "25565"
+          }
+        },
+        "mount": {
+          "/home/atomu/minecraft/data": "/MC"
+        }
+      },
+      "commands": {
+        "stop": [
+          {
+            "type": "attach",
+            "arg": "stop\n"
+          },
+          {
+            "type": "sleep",
+            "arg": "10s"
+          }
+        ],
+        "backup": [
+          {
+            "type": "attach",
+            "arg": "save-all"
+          },
+          {
+            "type": "sleep",
+            "arg": "5s"
+          },
+          {
+            "type": "backup",
+            "arg": "/home/atomu/minecraft/data:/home/atomu/backups/minecraft-1"
+          }
+        ],
+        "message": "[Discord] ${user}: ${message}"
+      },
+      "discord": {
+        "token": "YOUR_BOT_TOKEN",
+        "channel": "123456789012345678",
+        "webhook": "https://discord.com/api/webhooks/...",
+        "logSetting": "./logs.json"
+      }
+    }
+  }
+}
+```
+
 ### 主な機能
 
 - Webブラウザからのコンテナ操作（起動・停止・コンソール表示）
