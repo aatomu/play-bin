@@ -47,9 +47,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("/api/container/inspect", s.Auth(s.InspectContainer))
 	mux.HandleFunc("/api/container/start", s.Auth(s.Action("start")))
 	mux.HandleFunc("/api/container/stop", s.Auth(s.Action("stop")))
+	mux.HandleFunc("/api/container/kill", s.Auth(s.Action("kill")))
 	mux.HandleFunc("/api/container/backup", s.Auth(s.Action("backup")))
 	mux.HandleFunc("/api/container/restore", s.Auth(s.Action("restore")))
-	mux.HandleFunc("/api/container/kill", s.Auth(s.Action("kill")))
+	mux.HandleFunc("/api/container/remove", s.Auth(s.Action("remove")))
 	mux.HandleFunc("/api/container/cmd", s.Auth(s.CmdContainer))
 	mux.HandleFunc("/api/container/logs", s.Auth(s.GetContainerLogs))
 
