@@ -21,10 +21,23 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
       - `entrypoint?: string` - エントリーポイント
       - `arguments?: string` - コマンド引数
     - `restart?: "always" | "no" | "on-failure" | "unless-stopped"` - 再起動ポリシー
-      - `no`: コンテナが停止しても再起動しない(初期値)
-      - `always`: 必ず再起動する
-      - `on-failure`: コンテナが異常終了した場合に再起動する
-      - `unless-stopped`: コンテナが停止しても再起動する
+      - `no`: 再起動なし(初期値)
+        - プロセス異常終了時: 再起動しない
+        - `containerd`終了時: 再起動しない
+      - `always`: 常に再起動する
+        - プロセス異常終了時: 再起動する
+        - `containerd`終了時: 再起動する
+          - 手動で止めていた場合でも起動する
+      - `on-failure`: 異常終了時再起動
+        - プロセス異常終了時: 再起動する
+          - 終了ステータスが非0の場合
+        - `containerd`終了時: 再起動する
+          - 前回終了時に異常終了していた場合のみ
+      - `unless-stopped`: 明示的に停止されない限り再起動する
+        - プロセス異常終了時: 再起動する
+        - `containerd`終了時: 状況による
+          - 再起動前に`running`だった場合：再起動する
+          - 再起動前に`stopped|exited`だった場合：再起動しない
     - `network?: Object` - ネットワーク設定
       - `mode: "host" | "bridge"` - ネットワークモード
         - `host`: ホストネットワーク
