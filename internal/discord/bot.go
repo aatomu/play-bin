@@ -154,13 +154,6 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 
 	// 呼び出し元のチャンネルが特定の管理対象コンテナに割り当てられていない場合は無視する。
 	if !ok {
-		dg.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
-			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{
-				Content: "このチャンネルはどのサーバーとも連携されていません。",
-				Flags:   discordgo.MessageFlagsEphemeral,
-			},
-		})
 		return
 	}
 
