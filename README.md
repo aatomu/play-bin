@@ -11,22 +11,22 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
 - `users: map<username: string, UserConfig>` - ユーザー設定
   - `discord?: string` - ユーザーのDiscord ID
   - `password: string` - Web UIおよびSFTPログインに使用するパスワード
-  - `permissions: map<servername string, ("read" | "write" | "execute")[]>` - 操作権限の設定
+  - `permissions: map<servername: string, ("read" | "write" | "execute")[]>` - 操作権限の設定
     `servername`に`*`を指定するとすべてのサーバーに対して権限を設定
-- `servers: map<servername string, ServerConfig>` - サーバー設定
+- `servers: map<servername: string, ServerConfig>` - サーバー設定
   - `workingDir?: string` - 作業ディレクトリ
   - `compose?: Object` - コンテナ定義
     - `image: string` - Dockerイメージ
     - `command?: Object` - コンテナ起動コマンド
       - `entrypoint?: string` - エントリーポイント
       - `arguments?: string` - コマンド引数
-    - `restart?: "always"|"no"|"on-failure"|"unless-stopped"` - 再起動ポリシー
+    - `restart?: "always" | "no" | "on-failure" | "unless-stopped"` - 再起動ポリシー
       - `no`: コンテナが停止しても再起動しない(初期値)
       - `always`: 必ず再起動する
       - `on-failure`: コンテナが異常終了した場合に再起動する
       - `unless-stopped`: コンテナが停止しても再起動する
     - `network?: Object` - ネットワーク設定
-      - `mode: "host"|"bridge"` - ネットワークモード
+      - `mode: "host" | "bridge"` - ネットワークモード
         - `host`: ホストネットワーク
         - `bridge`: ブリッジネットワーク
       - `mapping?: map<string, string>` - ポートマッピング
@@ -43,14 +43,14 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
       - `arg: string` - コマンド引数 (backup種別の場合は `src:destBase` 形式)
     - `message?: string` - Discord通知メッセージのフォーマット
   - `discord?: Object` - Discord設定
-    - `token?: string` - Discord Botトークン (channelとセット)
-    - `channel?: string` - DiscordチャンネルID (tokenとセット)
-    - `webhook?: string` - Discord Webhook URL (logSettingとセット)
-    - `logSetting?: string` - ログ設定ファイルのパス (webhookとセット)
+    - `token?: string` - Discord Botトークン (`channel`とセット)
+    - `channel?: string` - DiscordチャンネルID (`token`とセット)
+    - `webhook?: string` - Discord Webhook URL (`logSetting`とセット)
+    - `logSetting?: string` - ログ設定ファイルのパス (`webhook`とセット)
 
 ```json
 {
-  "httpListen": ":8080", //
+  "httpListen": ":8080",
   "sftpListen": ":2022",
   "users": {
     "admin": {
@@ -140,38 +140,6 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
 
 4. サービスの起動
    生成されたバイナリを実行します。
-
-### 設定ファイルの解説
-
-設定ファイル（config.json）の主要なブロックについて説明します。
-
-### 全般設定 (top level)
-
-- `httpListen`: Web UIおよびAPIサーバーが待機するアドレスとポートです。省略または空欄にするとWebサーバーは起動しません。
-- `sftpListen`: ファイル操作用SFTPサーバーが待機するアドレスとポートです。省略または空欄にするとSFTPサーバーは起動しません。
-
-### ユーザー設定 (users)
-
-管理権限を持つユーザーを定義します。
-
-- `discord`: ユーザーのDiscord IDです。
-- `password`: Web UIおよびSFTPログインに使用するパスワードです。
-- `permissions`: 操作権限の設定です。サーバー名（または `*`）をキーとし、以下の権限リストを指定します。
-  - `read`: 状態閲覧、ログ閲覧、統計情報、ファイル一覧
-  - `write`: コンソール操作、ファイル書き込み・削除
-  - `execute`: コンテナの起動・停止・再起動・バックアップ
-
-### サーバー設定 (servers)
-
-管理対象となるコンテナ（サーバー）ごとに設定を行います。
-
-- `workingDir`: ホスト側での作業ディレクトリです。
-- `image`: 使用するDockerイメージ名です。
-- `network`: ポート開放やネットワークモードの設定です。
-- `mount`: ホストのディレクトリとコンテナ内のパスを紐付けます（SFTPはこの設定を元にアクセス範囲を決定します）。
-- `commands.backup`: バックアップの元パス（src）と保存先（dest）を指定します。
-- `discord.token`: Discord Bot用のトークンですが、省略可能です（省略した場合はそのサーバーのBot機能が無効になります）。
-- `discord.channel`: 操作コマンドを受け取るチャンネルIDですが、省略可能です。
 
 ### SFTPサーバーの利用方法
 
