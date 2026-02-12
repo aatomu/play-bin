@@ -58,24 +58,24 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 func (m *Manager) Start(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
-	if !ok || server.Image == "" {
+	if !ok || server.Compose == nil || server.Compose.Image == "" {
 		// 設定が存在しない、またはイメージが未定義の場合は、起動対象外として何もしない。
 		return nil
 	}
 
 	// コンテナのランタイム設定。TTYを有効にすることで、Web経由のターミナル操作を可能にする。
 	containerConfig := &ctypes.Config{
-		Image:     server.Image,
+		Image:     server.Compose.Image,
 		Tty:       true,
 		OpenStdin: true,
 	}
 
 	// カスタムの起動コマンドが指定されている場合のみ、エントリポイントや引数を上書きする。
-	if server.Commands.Start != nil {
-		if e := server.Commands.Start.Entrypoint; e != "" {
+	if server.Compose.Command != nil {
+		if e := server.Compose.Command.Entrypoint; e != "" {
 			containerConfig.Entrypoint = strings.Fields(e)
 		}
-		if a := server.Commands.Start.Arguments; a != "" {
+		if a := server.Compose.Command.Arguments; a != "" {
 			containerConfig.Cmd = strings.Fields(a)
 		}
 	}
@@ -83,21 +83,21 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 	hostConfig := &ctypes.HostConfig{}
 
 	// 設定された全ディレクトリをホストからコンテナのボリュームとしてマッピングする。
-	for hostPath, containerPath := range server.Mount {
+	for hostPath, containerPath := range server.Compose.Mount {
 		hostConfig.Binds = append(hostConfig.Binds, hostPath+":"+containerPath)
 	}
 
 	// ネットワーク接続モードの決定。明示的な指定がない場合は、隔離性の高い bridge モードを採用する。
-	hostConfig.NetworkMode = ctypes.NetworkMode(server.Network.Mode)
+	hostConfig.NetworkMode = ctypes.NetworkMode(server.Compose.Network.Mode)
 	if hostConfig.NetworkMode == "" {
 		hostConfig.NetworkMode = "bridge"
 	}
 
 	// ブリッジモード使用時のみ、外部公開用のポートフォワーディングを動的に構築する。
-	if hostConfig.NetworkMode == "bridge" && len(server.Network.Mapping) > 0 {
+	if hostConfig.NetworkMode == "bridge" && len(server.Compose.Network.Mapping) > 0 {
 		portBindings := nat.PortMap{}
 		exposedPorts := nat.PortSet{}
-		for hostPort, containerPort := range server.Network.Mapping {
+		for hostPort, containerPort := range server.Compose.Network.Mapping {
 			port := nat.Port(containerPort + "/tcp")
 			exposedPorts[port] = struct{}{}
 			portBindings[port] = []nat.PortBinding{{HostIP: "0.0.0.0", HostPort: hostPort}}
@@ -199,7 +199,7 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok {
-		return fmt.Errorf("server %s not found in config", id)
+		return fmt.Errorf("server %s not found in config or not managed by docker", id)
 	}
 
 	timestamp := time.Now().Format("20060102_150405")

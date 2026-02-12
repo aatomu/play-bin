@@ -140,7 +140,7 @@ func (s *Server) calculateActions(user config.UserConfig, name string, cfg confi
 	var actions []string
 
 	// 設定ファイルに定義が存在する場合のみ追加
-	if cfg.Commands.Start != nil {
+	if cfg.Compose != nil && cfg.Compose.Command != nil {
 		actions = append(actions, "start")
 	}
 	if cfg.Commands.Stop != nil { // 停止定義があれば Stop と Kill を許可

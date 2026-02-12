@@ -58,12 +58,17 @@ func (u UserConfig) HasPermission(serverName, perm string) bool {
 }
 
 type ServerConfig struct {
-	WorkingDir string            `json:"workingDir"`
-	Image      string            `json:"image"`
-	Network    NetworkConfig     `json:"network"`
-	Mount      map[string]string `json:"mount"`
-	Commands   CommandsConfig    `json:"commands"`
-	Discord    DiscordConfig     `json:"discord"`
+	WorkingDir string         `json:"workingDir"`
+	Compose    *ComposeConfig `json:"compose,omitempty"`
+	Commands   CommandsConfig `json:"commands"`
+	Discord    DiscordConfig  `json:"discord"`
+}
+
+type ComposeConfig struct {
+	Image   string            `json:"image"`
+	Command *StartConfig      `json:"command,omitempty"`
+	Network NetworkConfig     `json:"network,omitempty"`
+	Mount   map[string]string `json:"mount,omitempty"`
 }
 
 type NetworkConfig struct {
@@ -72,10 +77,9 @@ type NetworkConfig struct {
 }
 
 type CommandsConfig struct {
-	Start   *StartConfig `json:"start,omitempty"`
-	Stop    []CmdConfig  `json:"stop,omitempty"`
-	Backup  []CmdConfig  `json:"backup,omitempty"`
-	Message *string      `json:"message,omitempty"`
+	Stop    []CmdConfig `json:"stop,omitempty"`
+	Backup  []CmdConfig `json:"backup,omitempty"`
+	Message *string     `json:"message,omitempty"`
 }
 
 type StartConfig struct {

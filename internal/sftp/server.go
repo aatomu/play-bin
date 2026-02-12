@@ -1,6 +1,7 @@
 package sftp
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"github.com/pkg/sftp"
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
+	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
 	"golang.org/x/crypto/ssh"
 )
@@ -208,8 +210,7 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 		return "", os.ErrPermission
 	}
 
-	server, ok := cfg.Servers[containerName]
-	if !ok {
+	if _, ok := cfg.Servers[containerName]; !ok {
 		return "", os.ErrNotExist
 	}
 
@@ -221,12 +222,20 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 	// 仮想パス（例：/server1/config/settings.yml）から
 	// マウント設定（例：/server1/config -> /home/user/mc/config）を検索。
 	targetSubPath := parts[1]
-	for hostPath, containerPath := range server.Mount {
-		cPath := strings.Trim(containerPath, "/")
+
+	// コンテナの実体からマウント情報を動的に取得する（設定ファイルには依存しない）。
+	inspect, err := docker.Client.ContainerInspect(context.Background(), containerName)
+	if err != nil {
+		logger.Logf("Internal", "SFTP", "コンテナ %s の詳細取得失敗: %v", containerName, err)
+		return "", os.ErrNotExist
+	}
+
+	for _, m := range inspect.Mounts {
+		cPath := strings.Trim(m.Destination, "/")
 		if cPath == targetSubPath {
 			// マウントポイントより下位の相対パスを抽出し、ホスト上の実パスと結合する。
 			rel, _ := filepath.Rel(targetSubPath, strings.Join(parts[1:], "/"))
-			return filepath.Join(hostPath, rel), nil
+			return filepath.Join(m.Source, rel), nil
 		}
 	}
 
@@ -258,12 +267,17 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 		// コンテナ直下：設定されたマウントポイント名を一覧として返す。
 		if err == errVfsContainerRoot {
 			containerName := strings.Trim(r.Filepath, "/")
-			cfg := h.config.Get()
-			server := cfg.Servers[containerName]
 			var items []os.FileInfo
-			for _, containerPath := range server.Mount {
-				name := strings.Trim(containerPath, "/")
-				items = append(items, &vfsFileInfo{name: name, isDir: true})
+
+			// コンテナの実体から現在のマウント状況を問い合わせる。
+			inspect, err := docker.Client.ContainerInspect(context.Background(), containerName)
+			if err == nil {
+				for _, m := range inspect.Mounts {
+					name := strings.Trim(m.Destination, "/")
+					items = append(items, &vfsFileInfo{name: name, isDir: true})
+				}
+			} else {
+				logger.Logf("Internal", "SFTP", "コンテナ %s のマウント一覧取得失敗: %v", containerName, err)
 			}
 			return &listerAt{items: items}, nil
 		}

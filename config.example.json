@@ -13,21 +13,23 @@
   "servers": {
     "minecraft-1": {
       "workingDir": "/home/atomu/minecraft",
-      "image": "mc_java:21",
-      "network": {
-        "mode": "bridge",
-        "mapping": {
-          "25565": "25565"
-        }
-      },
-      "mount": {
-        "/home/atomu/minecraft/data": "/MC"
-      },
-      "commands": {
-        "start": {
+      "compose": {
+        "image": "mc_java:21",
+        "command": {
           "entrypoint": "java",
           "arguments": "-Xms2G -Xmx2G -jar server.jar nogui"
         },
+        "network": {
+          "mode": "bridge",
+          "mapping": {
+            "25565": "25565"
+          }
+        },
+        "mount": {
+          "/home/atomu/minecraft/data": "/MC"
+        }
+      },
+      "commands": {
         "stop": [
           {
             "type": "attach",
