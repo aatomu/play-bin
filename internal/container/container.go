@@ -128,6 +128,7 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 			_ = docker.Client.ContainerRemove(ctx, id, ctypes.RemoveOptions{})
 		}
 	} else if !errdefs.IsNotFound(err) {
+		// 存在しない(missing)場合のエラー以外は、クリティカルな問題として扱う。
 		logger.Logf("Internal", "Container", "コンテナ状態確認失敗(%s): %v", id, err)
 		return fmt.Errorf("failed to inspect container: %w", err)
 	}

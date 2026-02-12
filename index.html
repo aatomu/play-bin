@@ -19,6 +19,7 @@
         --danger: #cc3333;
         --success: #4caf50;
         --warning: #f39c12;
+        --exited: #9b59b6;
         --text: #eee;
         --muted: #888;
       }
@@ -185,6 +186,15 @@
       .dot.running {
         background: var(--success);
         box-shadow: 0 0 8px var(--success);
+      }
+      .dot.stopped {
+        background: var(--warning);
+      }
+      .dot.exited {
+        background: var(--exited);
+      }
+      .dot.missing {
+        background: var(--muted);
       }
 
       #main-content {
@@ -529,6 +539,7 @@
       let selectedId = ""; // コンテナ操作の主体。Docker ID または設定ファイルのサーバー名が入る
       let selectedName = ""; // UI表示用。ユーザーが認識しやすいコンテナ名
       let isRunningState = false; // 現在のコンテナが実行中かどうか
+      let isMissingState = false; // 現在のコンテナが実在しない(Missing)かどうか
       let currentTermMode = ""; // 現在のターミナルモード (logs/exec)
       let wsTerm, wsStats; // WebSocketコネクションを保持し、リアルタイム通信を管理する
       let termDataListener; // xterm.jsのイベントを購読し、解除可能にするための参照保持
@@ -751,10 +762,20 @@
               actionMap[cId] = c.actions || [];
               permissionMap[cId] = c.permissions || [];
 
-              const state = c.state || "";
+              const state = (c.state || "missing").toLowerCase();
+              let dotClass = "missing";
+              if (state === "running") dotClass = "running";
+              else if (state === "exited") dotClass = "exited";
+              else if (
+                state === "created" ||
+                state === "stopped" ||
+                state === "paused"
+              )
+                dotClass = "stopped";
+
               const isActive = selectedId === cId ? "active" : "";
               return `<div class="container-item ${isActive}" id="c-${cId || cName}" onclick="selectContainer('${cId}', '${cName}')">
-                        <div class="dot ${state === "running" ? "running" : ""}"></div>${cName}</div>`;
+                        <div class="dot ${dotClass}"></div>${cName}</div>`;
             })
             .join("");
 
@@ -840,6 +861,7 @@
               opt.disabled = true;
           } else {
             if (a === "stop" || a === "kill") opt.disabled = true;
+            if (a === "remove" && isMissingState) opt.disabled = true;
           }
 
           select.appendChild(opt);
@@ -907,34 +929,44 @@
         // したがって、infoが存在すればコントロールは有効化する（ただしボタン個別のAction定義に従う）。
         const isExists = status !== "MISSING";
 
-        controls.style.opacity = isExists ? "1" : "0.3";
-        controls.style.pointerEvents = isExists ? "auto" : "none";
+        // MISSING状態でもアクション（Start等）は実行可能なため、コントロール全体の透明度は下げない。
+        controls.style.opacity = "1";
+        controls.style.pointerEvents = "auto";
 
-        // ログなどのボタン制御
-        document.getElementById("btn-logs").disabled =
-          !selectedPermissions.includes("read");
-        document.getElementById("btn-exec").disabled =
-          !selectedPermissions.includes("write");
-        if (!selectedPermissions.includes("read")) {
-          document.getElementById("btn-logs").style.opacity = "0.5";
-        } else {
-          document.getElementById("btn-logs").style.opacity = "1";
-        }
-        if (!selectedPermissions.includes("write")) {
-          document.getElementById("btn-exec").style.opacity = "0.5";
-        } else {
-          document.getElementById("btn-exec").style.opacity = "1";
-        }
+        // ログ表示やExecはコンテナが実在（RunningまたはStopped）している必要がある。
+        const hasRead = selectedPermissions.includes("read");
+        const hasWrite = selectedPermissions.includes("write");
+
+        const btnLogs = document.getElementById("btn-logs");
+        const btnExec = document.getElementById("btn-exec");
+
+        btnLogs.disabled = !hasRead || !isExists;
+        btnExec.disabled = !hasWrite || !isExists;
+
+        btnLogs.style.opacity = hasRead && isExists ? "1" : "0.5";
+        btnExec.style.opacity = hasWrite && isExists ? "1" : "0.5";
 
         document.getElementById("command-bar").style.display = isRunning
           ? "flex"
           : "none";
 
         isRunningState = isRunning;
+        isMissingState = status === "MISSING";
         updateActionDropdown(); // 状態が変わったのでドロップダウンも再描画
 
         // 基本情報のレンダリング
-        document.getElementById("info-status").innerText = status;
+        const statusEl = document.getElementById("info-status");
+        statusEl.innerText = status;
+        statusEl.style.color = "var(--text)";
+        if (status === "RUNNING") statusEl.style.color = "var(--success)";
+        if (status === "EXITED") statusEl.style.color = "var(--exited)";
+        if (
+          status === "PAUSED" ||
+          status === "RESTARTING" ||
+          status === "CREATED"
+        )
+          statusEl.style.color = "var(--warning)";
+
         document.getElementById("info-pid").innerText = info?.State?.Pid || "-";
 
         const started = new Date(info?.State?.StartedAt);
