@@ -183,7 +183,7 @@
       ".+?]: (.*server operator.*)",
       ".+?]: (.*to the whitelist.*)",
       ".+?]: (.*from the whitelist.*)",
-      ".+?]: (.*\\[Server\\] .*)",
+      ".+?]: (?:\\[Not Secure\\]) (.*\\[Server\\] .*)",
       ".+?]: (.*\\[Rcon\\] .*)",
       ".+?]: (.+? lost connection: Server closed)",
       ".+?]: (.+? lost connection: Timed out)",
