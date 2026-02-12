@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -80,7 +81,7 @@ func SendExec(id string, cmd []string) error {
 		return err
 	}
 	if inspect.ExitCode != 0 {
-		return fmt.Errorf("command exited with code %d", inspect.ExitCode)
+		return fmt.Errorf("command exited with code %d: %w", inspect.ExitCode, errors.New("non-zero exit code"))
 	}
 
 	return nil

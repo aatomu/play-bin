@@ -2,15 +2,16 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/containerd/errdefs"
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/client"
 	"github.com/docker/go-connections/nat"
 
 	"github.com/play-bin/internal/config"
@@ -52,7 +53,7 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 	case ActionRemove:
 		return m.Remove(ctx, id)
 	default:
-		return fmt.Errorf("unknown action: %s", action)
+		return fmt.Errorf("unknown action: %w", errors.New(string(action)))
 	}
 }
 
@@ -116,21 +117,21 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 			// 停止中の古いコンテナを削除し、再作成の準備を整える。
 			_ = docker.Client.ContainerRemove(ctx, id, ctypes.RemoveOptions{})
 		}
-	} else if !client.IsErrNotFound(err) {
+	} else if !errdefs.IsNotFound(err) {
 		logger.Logf("Internal", "Container", "コンテナ状態確認失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to inspect container: %w", err)
 	}
 
 	// コンテナの実体を Docker エンジン上に生成する。
 	if _, err := docker.Client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, id); err != nil {
 		logger.Logf("Internal", "Container", "コンテナ作成失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to create container: %w", err)
 	}
 
 	// 生成したコンテナプロセスの実行を開始する。
 	if err := docker.Client.ContainerStart(ctx, id, ctypes.StartOptions{}); err != nil {
 		logger.Logf("Internal", "Container", "コンテナ起動失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to start container: %w", err)
 	}
 	logger.Logf("Internal", "Container", "コンテナの起動に成功しました: %s", id)
 	return nil
@@ -173,7 +174,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	// 全ての手順が完了、またはタイムアウト後に、Docker レベルでコンテナを最終停止させる。
 	if err := docker.Client.ContainerStop(ctx, id, ctypes.StopOptions{}); err != nil {
 		logger.Logf("Internal", "Container", "コンテナ停止失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to stop container: %w", err)
 	}
 	logger.Logf("Internal", "Container", "コンテナの停止に成功しました: %s", id)
 	return nil
@@ -192,6 +193,8 @@ func (m *Manager) Kill(ctx context.Context, id string) error {
 	err := docker.Client.ContainerKill(ctx, id, "SIGKILL")
 	if err == nil {
 		logger.Logf("Internal", "Container", "コンテナを強制終了しました: %s", id)
+	} else {
+		err = fmt.Errorf("failed to kill container: %w", err)
 	}
 	return err
 }
@@ -267,7 +270,7 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 	}
 
 	if hasError {
-		return fmt.Errorf("backup failed partially")
+		return fmt.Errorf("backup failed partially: %w", errors.New("one or more backup steps failed"))
 	}
 	logger.Logf("Internal", "Container", "バックアップが完了しました: %s", id)
 	return nil
@@ -330,18 +333,18 @@ func (m *Manager) Remove(ctx context.Context, id string) error {
 			// 稼働中の場合は削除を拒否し、ユーザーに停止を促す。
 			return fmt.Errorf("container is running. please stop/kill it before remove")
 		}
-	} else if client.IsErrNotFound(err) {
+	} else if errdefs.IsNotFound(err) {
 		// 既に存在しない場合は、目的が達成されているため成功として扱う。
 		return nil
 	} else {
 		logger.Logf("Internal", "Container", "コンテナ状態確認失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to check container state: %w", err)
 	}
 
 	// Docker SDK を呼び出し、コンテナを破棄する。
 	if err := docker.Client.ContainerRemove(ctx, id, ctypes.RemoveOptions{}); err != nil {
 		logger.Logf("Internal", "Container", "コンテナ削除失敗(%s): %v", id, err)
-		return err
+		return fmt.Errorf("failed to remove container: %w", err)
 	}
 
 	logger.Logf("Internal", "Container", "コンテナを削除しました: %s", id)

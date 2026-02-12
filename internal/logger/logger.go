@@ -15,7 +15,7 @@ func Log(level, service, message string) {
 
 // MARK: Logf()
 // フォーマット指定付きでログを出力する。
-func Logf(level, service, format string, v ...interface{}) {
+func Logf(level, service, format string, v ...any) {
 	Log(level, service, fmt.Sprintf(format, v...))
 }
 
@@ -47,7 +47,7 @@ func Error(service string, err error) {
 
 // MARK: InternalError()
 // 内部エラーをログに出力し、フォーマットされたエラーオブジェクトを返す。
-func InternalError(service, format string, v ...interface{}) error {
+func InternalError(service, format string, v ...any) error {
 	msg := fmt.Sprintf(format, v...)
 	Internal(service, msg)
 	return fmt.Errorf("[%s] %s", service, msg)
@@ -55,7 +55,7 @@ func InternalError(service, format string, v ...interface{}) error {
 
 // MARK: ClientError()
 // クライアント起因のエラーをログに出力し、エラーオブジェクトを返す。
-func ClientError(service, format string, v ...interface{}) error {
+func ClientError(service, format string, v ...any) error {
 	msg := fmt.Sprintf(format, v...)
 	Client(service, msg)
 	return fmt.Errorf("[%s] %s", service, msg)
@@ -63,7 +63,7 @@ func ClientError(service, format string, v ...interface{}) error {
 
 // MARK: ExternalError()
 // 外部依存関係のエラーをログに出力し、エラーオブジェクトを返す。
-func ExternalError(service, format string, v ...interface{}) error {
+func ExternalError(service, format string, v ...any) error {
 	msg := fmt.Sprintf(format, v...)
 	External(service, msg)
 	return fmt.Errorf("[%s] %s", service, msg)

@@ -2,6 +2,7 @@ package sftp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -40,7 +41,7 @@ func NewServer(cfg *config.LoadedConfig, cm *container.Manager) *Server {
 
 	// サーバーの正当性を証明するホストキーの準備。
 	keyPath := "sftp_host_key"
-	if _, err := os.Stat(keyPath); os.IsNotExist(err) {
+	if _, err := os.Stat(keyPath); errors.Is(err, os.ErrNotExist) {
 		// 未生成の場合は、信頼性を確保するため初回起動時に自動生成を試みる。
 		logger.Log("Internal", "SFTP", "新規ホストキーを生成しています...")
 		generateHostKey(keyPath)
@@ -166,7 +167,7 @@ func (s *Server) handleConn(nConn net.Conn) {
 			FileList: rootHandler,
 		})
 
-		if err := server.Serve(); err != nil && err != io.EOF {
+		if err := server.Serve(); err != nil && !errors.Is(err, io.EOF) {
 			logger.Logf("Internal", "SFTP", "セッション異常終了 (user=%s): %v", username, err)
 		}
 	}
@@ -413,4 +414,4 @@ func (f *vfsFileInfo) Mode() os.FileMode {
 }
 func (f *vfsFileInfo) ModTime() time.Time { return time.Now() }
 func (f *vfsFileInfo) IsDir() bool        { return f.isDir }
-func (f *vfsFileInfo) Sys() interface{}   { return nil }
+func (f *vfsFileInfo) Sys() any           { return nil }
