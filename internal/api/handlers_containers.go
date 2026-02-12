@@ -152,6 +152,9 @@ func (s *Server) calculateActions(user config.UserConfig, name string, cfg confi
 		actions = append(actions, "restore")
 	}
 
+	// 物理的なコンテナが存在する場合のみ、削除(remove)を許可する
+	actions = append(actions, "remove")
+
 	return actions
 }
 

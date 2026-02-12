@@ -26,6 +26,7 @@ const (
 	ActionKill    Action = "kill"
 	ActionBackup  Action = "backup"
 	ActionRestore Action = "restore"
+	ActionRemove  Action = "remove"
 )
 
 // Manager handles high-level container operations
@@ -48,6 +49,8 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 		return m.Backup(ctx, id)
 	case ActionRestore:
 		return m.Restore(ctx, id)
+	case ActionRemove:
+		return m.Remove(ctx, id)
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}
@@ -315,5 +318,32 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 		return fmt.Errorf("restore failed partially")
 	}
 	logger.Logf("Internal", "Container", "最新のバックアップからの復元が完了しました: %s", id)
+	return nil
+}
+
+// MARK: Remove()
+// 停止状態のコンテナを、Docker エンジンから物理的に削除する。
+func (m *Manager) Remove(ctx context.Context, id string) error {
+	// 誤って稼働中のサービスを破壊しないよう、事前に実行状態を厳密にチェックする。
+	if inspect, err := docker.Client.ContainerInspect(ctx, id); err == nil {
+		if inspect.State.Running {
+			// 稼働中の場合は削除を拒否し、ユーザーに停止を促す。
+			return fmt.Errorf("container is running. please stop/kill it before remove")
+		}
+	} else if client.IsErrNotFound(err) {
+		// 既に存在しない場合は、目的が達成されているため成功として扱う。
+		return nil
+	} else {
+		logger.Logf("Internal", "Container", "コンテナ状態確認失敗(%s): %v", id, err)
+		return err
+	}
+
+	// Docker SDK を呼び出し、コンテナを破棄する。
+	if err := docker.Client.ContainerRemove(ctx, id, ctypes.RemoveOptions{}); err != nil {
+		logger.Logf("Internal", "Container", "コンテナ削除失敗(%s): %v", id, err)
+		return err
+	}
+
+	logger.Logf("Internal", "Container", "コンテナを削除しました: %s", id)
 	return nil
 }

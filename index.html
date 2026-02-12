@@ -833,6 +833,15 @@
           const opt = document.createElement("option");
           opt.value = a;
           opt.text = a.charAt(0).toUpperCase() + a.slice(1);
+
+          // 状態に応じた無効化処理 (Start/Stop/Kill/Remove)
+          if (isRunningState) {
+            if (a === "start" || a === "restore" || a === "remove")
+              opt.disabled = true;
+          } else {
+            if (a === "stop" || a === "kill") opt.disabled = true;
+          }
+
           select.appendChild(opt);
         });
       }
@@ -922,6 +931,7 @@
           : "none";
 
         isRunningState = isRunning;
+        updateActionDropdown(); // 状態が変わったのでドロップダウンも再描画
 
         // 基本情報のレンダリング
         document.getElementById("info-status").innerText = status;

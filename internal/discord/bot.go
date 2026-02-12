@@ -119,6 +119,7 @@ func (m *BotManager) registerCommands(dg *discordgo.Session) {
 						{Name: "backup", Value: "backup"},
 						{Name: "restore", Value: "restore"},
 						{Name: "kill", Value: "kill"},
+						{Name: "remove", Value: "remove"},
 					},
 				},
 			},
