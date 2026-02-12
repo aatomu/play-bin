@@ -66,6 +66,7 @@ type ServerConfig struct {
 
 type ComposeConfig struct {
 	Image   string            `json:"image"`
+	Restart string            `json:"restart,omitempty"`
 	Command *StartConfig      `json:"command,omitempty"`
 	Network NetworkConfig     `json:"network,omitempty"`
 	Mount   map[string]string `json:"mount,omitempty"`

@@ -91,6 +91,16 @@ func (m *Manager) Start(ctx context.Context, id string) error {
 		hostConfig.Binds = append(hostConfig.Binds, hostPath+":"+containerPath)
 	}
 
+	// 異常終了時の自動再起動ポリシーを設定する。
+	// デフォルト（未指定）は "no" とし、明示的な指定がある場合のみ適用する。
+	restartPolicy := server.Compose.Restart
+	if restartPolicy == "" {
+		restartPolicy = "no"
+	}
+	hostConfig.RestartPolicy = ctypes.RestartPolicy{
+		Name: ctypes.RestartPolicyMode(restartPolicy),
+	}
+
 	// ネットワーク接続モードの決定。明示的な指定がない場合は、隔離性の高い bridge モードを採用する。
 	hostConfig.NetworkMode = ctypes.NetworkMode(server.Compose.Network.Mode)
 	if hostConfig.NetworkMode == "" {
