@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,7 +51,8 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 	case ActionBackup:
 		return m.Backup(ctx, id)
 	case ActionRestore:
-		return m.Restore(ctx, id)
+		// restore は世代指定パラメータが必要なため、専用ハンドラから直接呼び出す。
+		return m.Restore(ctx, id, "")
 	case ActionRemove:
 		return m.Remove(ctx, id)
 	default:
@@ -219,7 +222,8 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 		return fmt.Errorf("server %s not found in config or not managed by docker", id)
 	}
 
-	timestamp := time.Now().Format("20060102_150405")
+	// マシンのタイムゾーンに合わせた世代名を生成する。
+	timestamp := time.Now().Local().Format("20060102_150405")
 	var hasError bool
 
 	// 整合性のあるバックアップを取得するため、事前に「保存」コマンド等を送信する必要があるかを確認する。
@@ -287,9 +291,60 @@ func (m *Manager) Backup(ctx context.Context, id string) error {
 	return nil
 }
 
+// MARK: ListBackupGenerations()
+// バックアップディレクトリ内の世代（タイムスタンプ）一覧を新しい順で返す。
+func (m *Manager) ListBackupGenerations(id string) ([]string, error) {
+	cfg := m.Config.Get()
+	server, ok := cfg.Servers[id]
+	if !ok {
+		return nil, fmt.Errorf("server %s not found in config", id)
+	}
+
+	// 複数のバックアップ定義がある場合は、全ての destBase を横断して世代を集約する。
+	seen := make(map[string]bool)
+	var generations []string
+
+	for _, cmd := range server.Commands.Backup {
+		if cmd.Type != "backup" {
+			continue
+		}
+
+		parts := strings.SplitN(cmd.Arg, ":", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		destBase := parts[1]
+
+		entries, err := os.ReadDir(destBase)
+		if err != nil {
+			// ディレクトリ自体がまだ存在しない場合は空として扱う。
+			continue
+		}
+
+		for _, entry := range entries {
+			// latest シンボリックリンクは世代一覧から除外する。
+			if entry.Name() == "latest" {
+				continue
+			}
+			if !entry.IsDir() {
+				continue
+			}
+			if !seen[entry.Name()] {
+				seen[entry.Name()] = true
+				generations = append(generations, entry.Name())
+			}
+		}
+	}
+
+	// タイムスタンプ形式のため、降順ソートで最新が先頭に来る。
+	sort.Sort(sort.Reverse(sort.StringSlice(generations)))
+	return generations, nil
+}
+
 // MARK: Restore()
-// 保存されている最新のバックアップから、データをロールバックする。
-func (m *Manager) Restore(ctx context.Context, id string) error {
+// 指定された世代のバックアップからデータをロールバックする。
+// generation が空文字の場合は latest（最新）から復元する。
+func (m *Manager) Restore(ctx context.Context, id string, generation string) error {
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok {
@@ -313,16 +368,23 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 			continue
 		}
 		src, destBase := parts[0], parts[1]
-		latest := fmt.Sprintf("%s/latest", destBase)
 
-		if _, err := os.Stat(latest); err != nil {
+		// 世代が指定されていない場合は latest シンボリックリンクを使う（従来互換）。
+		var restoreSrc string
+		if generation == "" {
+			restoreSrc = filepath.Join(destBase, "latest")
+		} else {
+			restoreSrc = filepath.Join(destBase, generation)
+		}
+
+		if _, err := os.Stat(restoreSrc); err != nil {
 			// 復元元が存在しない場合は、警告を出しつつ次の項目へ。
-			logger.Logf("Internal", "Container", "%s: 復元対象のバックアップが見つかりません: %s", id, latest)
+			logger.Logf("Internal", "Container", "%s: 復元対象のバックアップが見つかりません: %s", id, restoreSrc)
 			continue
 		}
 
 		// バックアップ時点の状態に完全に一致させるため、rsync の --delete オプション付きで復元する。
-		if out, err := exec.CommandContext(ctx, "rsync", "-avh", "--delete", latest+"/", src).CombinedOutput(); err != nil {
+		if out, err := exec.CommandContext(ctx, "rsync", "-avh", "--delete", restoreSrc+"/", src).CombinedOutput(); err != nil {
 			logger.Logf("Internal", "Container", "%s: 復元失敗: %v, output: %s", id, err, string(out))
 			hasError = true
 		}
@@ -331,7 +393,12 @@ func (m *Manager) Restore(ctx context.Context, id string) error {
 	if hasError {
 		return fmt.Errorf("restore failed partially")
 	}
-	logger.Logf("Internal", "Container", "最新のバックアップからの復元が完了しました: %s", id)
+
+	if generation == "" {
+		logger.Logf("Internal", "Container", "最新のバックアップからの復元が完了しました: %s", id)
+	} else {
+		logger.Logf("Internal", "Container", "世代 %s からの復元が完了しました: %s", generation, id)
+	}
 	return nil
 }
 

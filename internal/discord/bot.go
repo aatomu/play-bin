@@ -125,6 +125,12 @@ func (m *BotManager) registerCommands(dg *discordgo.Session) {
 						{Name: "remove", Value: "remove"},
 					},
 				},
+				{
+					Type:        discordgo.ApplicationCommandOptionString,
+					Name:        "generation",
+					Description: "復元するバックアップ世代（省略時は最新）",
+					Required:    false,
+				},
 			},
 		},
 		{
@@ -217,10 +223,22 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 	case "action":
 		act := i.ApplicationCommandData().Options[0].StringValue()
 		logger.Logf("Client", "Discord", "アクション実行: user=%s, action=%s, target=%s", userID, act, serverName)
-		err := m.ContainerManager.ExecuteAction(context.Background(), serverName, container.Action(act))
-		if err != nil {
+
+		var actionErr error
+		if act == "restore" {
+			// restore は世代指定が可能なため、専用メソッドを直接呼び出す。
+			generation := ""
+			if len(i.ApplicationCommandData().Options) > 1 {
+				generation = i.ApplicationCommandData().Options[1].StringValue()
+			}
+			actionErr = m.ContainerManager.Restore(context.Background(), serverName, generation)
+		} else {
+			actionErr = m.ContainerManager.ExecuteAction(context.Background(), serverName, container.Action(act))
+		}
+
+		if actionErr != nil {
 			dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
-				Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed(act, err)},
+				Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed(act, actionErr)},
 			})
 			return
 		}

@@ -317,16 +317,111 @@
         border-top: 1px solid #333;
         padding-top: 4px;
       }
+
+      /* トースト通知 */
+      .toast-container {
+        position: fixed;
+        top: 16px;
+        right: 16px;
+        z-index: 10000;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        pointer-events: none;
+      }
+      .toast {
+        pointer-events: auto;
+        min-width: 280px;
+        max-width: 420px;
+        padding: 12px 18px;
+        border-radius: 8px;
+        font-size: 13px;
+        color: #fff;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+        animation: toast-in 0.3s ease-out;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .toast.success {
+        background: linear-gradient(135deg, #1b5e20, #2e7d32);
+        border-left: 4px solid #4caf50;
+      }
+      .toast.error {
+        background: linear-gradient(135deg, #b71c1c, #c62828);
+        border-left: 4px solid #f44336;
+      }
+      .toast.loading {
+        background: linear-gradient(135deg, #0d47a1, #1565c0);
+        border-left: 4px solid #42a5f5;
+      }
+      .toast .toast-icon {
+        font-size: 18px;
+        flex-shrink: 0;
+      }
+      .toast .toast-msg {
+        flex: 1;
+        line-height: 1.4;
+      }
+      @keyframes toast-in {
+        from {
+          opacity: 0;
+          transform: translateX(40px);
+        }
+        to {
+          opacity: 1;
+          transform: translateX(0);
+        }
+      }
+      @keyframes toast-out {
+        from {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(40px);
+        }
+      }
     </style>
   </head>
 
   <body>
+    <div class="toast-container" id="toast-container"></div>
+
     <div id="modal-overlay">
       <div class="modal">
         <h3 id="modal-title">Confirm Action</h3>
         <p id="modal-body" style="font-size: 14px; color: var(--muted)">
           Are you sure?
         </p>
+        <div
+          id="modal-generation-wrapper"
+          style="display: none; margin-bottom: 12px"
+        >
+          <label
+            style="
+              font-size: 12px;
+              color: var(--muted);
+              display: block;
+              margin-bottom: 4px;
+            "
+            >Backup Generation</label
+          >
+          <select
+            id="modal-generation-select"
+            style="
+              width: 100%;
+              padding: 8px;
+              border-radius: 4px;
+              background: #333;
+              color: white;
+              border: 1px solid #444;
+              font-family: monospace;
+              font-size: 13px;
+            "
+          ></select>
+        </div>
         <div class="modal-btns">
           <button onclick="closeModal()">Cancel</button>
           <button id="modal-confirm-btn" class="primary">Execute</button>
@@ -666,20 +761,54 @@
 
       // MARK: confirmAction()
       // ユーザーが実行ボタン等を押した際、誤操作によるシステム停止やデータ上書きを防ぐため、実行確認のダイアログを前面に表示する。
-      function confirmAction(action) {
+      async function confirmAction(action) {
         // 対象が未選択の状態でアクションを起こさせない（安全ガード）
         if (!selectedId) return;
         const overlay = document.getElementById("modal-overlay");
         const confirmBtn = document.getElementById("modal-confirm-btn");
+        const genWrapper = document.getElementById("modal-generation-wrapper");
+        const genSelect = document.getElementById("modal-generation-select");
 
         document.getElementById("modal-title").innerText =
           `Container ${action.toUpperCase()}`;
+
+        // restore の場合はバックアップ世代一覧を取得し、選択 UI を表示する。
+        if (action === "restore") {
+          genWrapper.style.display = "block";
+          genSelect.innerHTML = '<option value="">Latest (最新)</option>';
+          try {
+            const res = await fetch(`/api/container/backups?id=${selectedId}`, {
+              headers: { Authorization: token },
+            });
+            if (res.ok) {
+              const generations = await res.json();
+              if (generations && generations.length > 0) {
+                generations.forEach((g) => {
+                  const opt = document.createElement("option");
+                  opt.value = g;
+                  // タイムスタンプを見やすい形式に変換する (20260212_150405 -> 2026/02/12 15:04:05)
+                  const formatted = g.replace(
+                    /(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})(\d{2})/,
+                    "$1/$2/$3 $4:$5:$6",
+                  );
+                  opt.text = formatted;
+                  genSelect.appendChild(opt);
+                });
+              }
+            }
+          } catch (e) {
+            console.error("Failed to fetch backup generations:", e);
+          }
+        } else {
+          genWrapper.style.display = "none";
+        }
 
         // ユーザーに意図を確認し、承認があれば API リクエストへ繋げる。
         document.getElementById("modal-body").innerText =
           `本当に "${selectedName}" に対して ${action} を実行しますか？`;
         confirmBtn.onclick = () => {
-          executeContainerAction(action);
+          const generation = action === "restore" ? genSelect.value : "";
+          executeContainerAction(action, generation);
           closeModal();
         };
 
@@ -694,13 +823,31 @@
 
       // MARK: executeContainerAction()
       // ユーザーの承認を受け、バックエンドのコンテナ操作 API に対して認証済みのリクエストを発行する。
-      async function executeContainerAction(action) {
+      async function executeContainerAction(action, generation) {
+        // 実行開始をユーザーに通知し、完了まで待機中であることを伝える。
+        const loadingToast = showToast("loading", `${action} を実行中...`, 0);
+
         try {
-          const res = await fetch(`/api/container/${action}?id=${selectedId}`, {
+          // restore は世代指定パラメータを含める。
+          let url = `/api/container/${action}?id=${selectedId}`;
+          if (action === "restore" && generation) {
+            url += `&generation=${encodeURIComponent(generation)}`;
+          }
+          const res = await fetch(url, {
             method: "POST",
             headers: { Authorization: token },
           });
-          if (!res.ok) throw new Error(`${action} に失敗しました`);
+
+          // ローディングトーストを除去してから結果を表示する。
+          removeToast(loadingToast);
+
+          if (!res.ok) {
+            const errText = await res.text();
+            showToast("error", `${action} に失敗: ${errText}`, 6000);
+            return;
+          }
+
+          showToast("success", `${action} が正常に完了しました`, 4000);
 
           // Docker エンジンの状態変更（非同期）を考慮し、ステータスの再反映までに猶予を持たせる。
           setTimeout(() => {
@@ -708,8 +855,34 @@
             loadInspectData(selectedId);
           }, 1000);
         } catch (e) {
-          alert(e.message);
+          removeToast(loadingToast);
+          showToast("error", `${action} に失敗: ${e.message}`, 6000);
         }
+      }
+
+      // MARK: showToast()
+      // 画面右上にフィードバック通知を表示する。duration=0 は手動で除去するまで表示し続ける。
+      function showToast(type, message, duration) {
+        const container = document.getElementById("toast-container");
+        const toast = document.createElement("div");
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `<span class="toast-msg">${message}</span>`;
+        container.appendChild(toast);
+
+        if (duration > 0) {
+          setTimeout(() => removeToast(toast), duration);
+        }
+        return toast;
+      }
+
+      // MARK: removeToast()
+      // フェードアウトアニメーション付きでトーストを除去する。
+      function removeToast(toast) {
+        if (!toast || !toast.parentNode) return;
+        toast.style.animation = "toast-out 0.3s ease-in forwards";
+        setTimeout(() => {
+          if (toast.parentNode) toast.parentNode.removeChild(toast);
+        }, 300);
       }
 
       // MARK: doLogin()

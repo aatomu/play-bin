@@ -1,9 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
@@ -196,8 +198,13 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 			return
 		}
 
+		// バックアップ・リストア等の長時間処理に対応するため、HTTPリクエストのコンテキストではなく、
+		// 十分なタイムアウトを持つ背景コンテキストを使用する。
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+
 		// 共通のマネージャーを介して非同期または連鎖的なアクション（停止前コマンド等）を実行する。
-		if err := s.ContainerManager.ExecuteAction(r.Context(), id, action); err != nil {
+		if err := s.ContainerManager.ExecuteAction(ctx, id, action); err != nil {
 			// アクションの失敗は、コンテナの状態不整合やリソース不足などの内部問題（Internal）として扱う。
 			logger.Logf("Internal", "API", "コンテナ %s へのアクション %s 実行失敗: %v", id, action, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -206,6 +213,59 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 		logger.Logf("Internal", "API", "アクション実行成功: container=%s, action=%s", id, action)
 		w.WriteHeader(http.StatusOK)
 	}
+}
+
+// MARK: ListBackups()
+// 指定コンテナのバックアップ世代一覧を返す。
+func (s *Server) ListBackups(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+
+	generations, err := s.ContainerManager.ListBackupGenerations(id)
+	if err != nil {
+		logger.Logf("Internal", "API", "バックアップ世代一覧取得失敗: container=%s, err=%v", id, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(generations); err != nil {
+		logger.Logf("Internal", "API", "JSONエンコード失敗: %v", err)
+	}
+}
+
+// MARK: RestoreAction()
+// 世代を指定してコンテナのバックアップから復元するハンドラー。
+func (s *Server) RestoreAction(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	generation := r.URL.Query().Get("generation")
+
+	token := r.Header.Get("Authorization")
+	if token == "" {
+		token = r.URL.Query().Get("token")
+	}
+	s.WebSessionMu.RLock()
+	username := s.WebSessions[token]
+	s.WebSessionMu.RUnlock()
+
+	if !s.Config.Get().Users[username].HasPermission(id, "execute") {
+		logger.Logf("Client", "API", "Restore拒否: user=%s, target=%s", username, id)
+		http.Error(w, "Execute permission required", http.StatusForbidden)
+		return
+	}
+
+	// バックアップ・リストア等の長時間処理に対応するため、HTTPリクエストのコンテキストではなく、
+	// 十分なタイムアウトを持つ背景コンテキストを使用する。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	// 世代パラメータを受けて直接 Restore を呼び出す。
+	if err := s.ContainerManager.Restore(ctx, id, generation); err != nil {
+		logger.Logf("Internal", "API", "コンテナ %s のリストア失敗 (generation=%s): %v", id, generation, err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	logger.Logf("Internal", "API", "リストア成功: container=%s, generation=%s", id, generation)
+	w.WriteHeader(http.StatusOK)
 }
 
 // MARK: CmdContainer()
