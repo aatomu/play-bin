@@ -51,8 +51,8 @@ func (m *Manager) ExecuteAction(ctx context.Context, id string, action Action) e
 	case ActionBackup:
 		return m.Backup(ctx, id)
 	case ActionRestore:
-		// restore は世代指定パラメータが必要なため、専用ハンドラから直接呼び出す。
-		return m.Restore(ctx, id, "")
+		// restore は世代指定パラメータが必須のため、汎用アクション経由では実行不可。
+		return fmt.Errorf("restore requires a generation parameter. use dedicated restore handler")
 	case ActionRemove:
 		return m.Remove(ctx, id)
 	default:
@@ -343,8 +343,12 @@ func (m *Manager) ListBackupGenerations(id string) ([]string, error) {
 
 // MARK: Restore()
 // 指定された世代のバックアップからデータをロールバックする。
-// generation が空文字の場合は latest（最新）から復元する。
+// generation は必須であり、空文字の場合はエラーを返す。
 func (m *Manager) Restore(ctx context.Context, id string, generation string) error {
+	if generation == "" {
+		return fmt.Errorf("generation is required for restore")
+	}
+
 	cfg := m.Config.Get()
 	server, ok := cfg.Servers[id]
 	if !ok {
@@ -369,13 +373,8 @@ func (m *Manager) Restore(ctx context.Context, id string, generation string) err
 		}
 		src, destBase := parts[0], parts[1]
 
-		// 世代が指定されていない場合は latest シンボリックリンクを使う（従来互換）。
-		var restoreSrc string
-		if generation == "" {
-			restoreSrc = filepath.Join(destBase, "latest")
-		} else {
-			restoreSrc = filepath.Join(destBase, generation)
-		}
+		// 必須パラメータとして受け取った世代名のディレクトリから復元する。
+		restoreSrc := filepath.Join(destBase, generation)
 
 		if _, err := os.Stat(restoreSrc); err != nil {
 			// 復元元が存在しない場合は、警告を出しつつ次の項目へ。
@@ -394,11 +393,7 @@ func (m *Manager) Restore(ctx context.Context, id string, generation string) err
 		return fmt.Errorf("restore failed partially")
 	}
 
-	if generation == "" {
-		logger.Logf("Internal", "Container", "最新のバックアップからの復元が完了しました: %s", id)
-	} else {
-		logger.Logf("Internal", "Container", "世代 %s からの復元が完了しました: %s", generation, id)
-	}
+	logger.Logf("Internal", "Container", "世代 %s からの復元が完了しました: %s", generation, id)
 	return nil
 }
 

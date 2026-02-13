@@ -128,10 +128,14 @@ func (m *BotManager) registerCommands(dg *discordgo.Session) {
 				{
 					Type:        discordgo.ApplicationCommandOptionString,
 					Name:        "generation",
-					Description: "復元するバックアップ世代（省略時は最新）",
+					Description: "復元するバックアップ世代（restore時は必須）",
 					Required:    false,
 				},
 			},
+		},
+		{
+			Name:        "backups",
+			Description: "バックアップ世代の一覧を表示します",
 		},
 		{
 			Name:        "cmd",
@@ -180,6 +184,8 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 	switch i.ApplicationCommandData().Name {
 	case "action":
 		requiredPerm = "execute"
+	case "backups":
+		requiredPerm = "read"
 	case "cmd":
 		requiredPerm = "write"
 	default:
@@ -226,10 +232,17 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 
 		var actionErr error
 		if act == "restore" {
-			// restore は世代指定が可能なため、専用メソッドを直接呼び出す。
+			// restore は世代指定が必須。未指定時はエラーを返す。
 			generation := ""
 			if len(i.ApplicationCommandData().Options) > 1 {
 				generation = i.ApplicationCommandData().Options[1].StringValue()
+			}
+			if generation == "" {
+				dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+					Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed(act,
+						fmt.Errorf("世代の指定が必要です。/backups で一覧を確認してください"))},
+				})
+				return
 			}
 			actionErr = m.ContainerManager.Restore(context.Background(), serverName, generation)
 		} else {
@@ -244,6 +257,37 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 		}
 		dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
 			Embeds: &[]*discordgo.MessageEmbed{m.interactionSuccessEmbed(act, "実行が完了しました")},
+		})
+	case "backups":
+		// バックアップ世代の一覧を取得し、Embedで表示する。
+		generations, err := m.ContainerManager.ListBackupGenerations(serverName)
+		if err != nil {
+			dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{m.interactionErrorEmbed("backups", err)},
+			})
+			return
+		}
+		if len(generations) == 0 {
+			dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+				Embeds: &[]*discordgo.MessageEmbed{m.interactionSuccessEmbed("backups", "バックアップが見つかりません")},
+			})
+			return
+		}
+		// 一覧を見やすく整形して表示する。
+		var listText strings.Builder
+		for idx, g := range generations {
+			if idx >= 20 {
+				listText.WriteString(fmt.Sprintf("\n...他 %d 件", len(generations)-20))
+				break
+			}
+			listText.WriteString(fmt.Sprintf("`%s`\n", g))
+		}
+		dg.InteractionResponseEdit(i.Interaction, &discordgo.WebhookEdit{
+			Embeds: &[]*discordgo.MessageEmbed{{
+				Color:       colorInfo,
+				Title:       fmt.Sprintf("バックアップ一覧: %s", serverName),
+				Description: listText.String(),
+			}},
 		})
 	case "cmd":
 		text := i.ApplicationCommandData().Options[0].StringValue()
