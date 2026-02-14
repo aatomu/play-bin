@@ -59,16 +59,20 @@ func (m *BotManager) SyncBots() {
 	m.ChannelToServer = newChannelToServer
 	m.mu.Unlock()
 
-	// 新たに追加されたトークンに対して、個別の Bot セッションを立ち上げる。
+	// 新たに追加されたトークン、または既存セッションが不健全な場合に再起動を試みる。
 	for token := range activeTokens {
 		m.mu.RLock()
-		_, exists := m.Sessions[token]
+		session, exists := m.Sessions[token]
 		m.mu.RUnlock()
 
-		if !exists {
+		shouldStart := !exists
+		if exists && session == nil {
+			shouldStart = true
+		}
+
+		if shouldStart {
 			dg, err := discordgo.New("Bot " + token)
 			if err != nil {
-				// トークン不正等の外部要因（External）として記録。
 				logger.Logf("External", "Discord", "セッション作成失敗: %v", err)
 				continue
 			}
@@ -77,12 +81,13 @@ func (m *BotManager) SyncBots() {
 			dg.AddHandler(m.onMessageCreate)
 
 			if err := dg.Open(); err != nil {
-				// Discord APIへの接続失敗（External）として記録。
-				logger.Logf("External", "Discord", "接続オープン失敗: %v", err)
+				logger.Logf("External", "Discord", "接続オープン失敗 (token終端: ...%s): %v", token[len(token)-4:], err)
+				m.mu.Lock()
+				m.Sessions[token] = nil // リトライ対象として nil をセット
+				m.mu.Unlock()
 				continue
 			}
 
-			// スラッシュコマンドを Discord 側へデプロイする。
 			m.registerCommands(dg)
 
 			m.mu.Lock()
@@ -96,7 +101,9 @@ func (m *BotManager) SyncBots() {
 	m.mu.Lock()
 	for token, session := range m.Sessions {
 		if !activeTokens[token] {
-			session.Close()
+			if session != nil {
+				session.Close()
+			}
 			delete(m.Sessions, token)
 			logger.Logf("Internal", "Discord", "Botを停止しました (token終端: ...%s)", token[len(token)-4:])
 		}

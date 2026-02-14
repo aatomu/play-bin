@@ -163,12 +163,12 @@ func (s *Server) calculateActions(user config.UserConfig, name string, cfg confi
 // MARK: InspectContainer()
 // コンテナの詳細情報を取得する。
 func (s *Server) InspectContainer(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+	serverName := r.URL.Query().Get("id")
 	// 詳細情報を取得し、フロントエンドでの詳細表示（スペックやネットワーク設定など）に利用する。
-	inspect, err := docker.Client.ContainerInspect(r.Context(), id)
+	inspect, err := docker.Client.ContainerInspect(r.Context(), serverName)
 	if err != nil {
 		// コンテナが見つからない原因はクライアントからの無効な指定（Client）として扱う。
-		logger.Logf("Client", "API", "コンテナ %s の詳細取得失敗: %v", id, err)
+		logger.Logf("Client", "API", "コンテナ %s の詳細取得失敗: %v", serverName, err)
 		http.Error(w, "Container Not Found", http.StatusNotFound)
 		return
 	}
@@ -182,7 +182,7 @@ func (s *Server) InspectContainer(w http.ResponseWriter, r *http.Request) {
 // コンテナに対して操作（起動・停止など）を実行するためのハンドラーを生成する。
 func (s *Server) Action(action container.Action) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.URL.Query().Get("id")
+		serverName := r.URL.Query().Get("id")
 
 		token := r.Header.Get("Authorization")
 		if token == "" {
@@ -192,8 +192,8 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 		username := s.WebSessions[token]
 		s.WebSessionMu.RUnlock()
 
-		if !s.Config.Get().Users[username].HasPermission(id, "execute") {
-			logger.Logf("Client", "API", "Action拒否: user=%s, target=%s", username, id)
+		if !s.Config.Get().Users[username].HasPermission(serverName, "execute") {
+			logger.Logf("Client", "API", "Action拒否: user=%s, target=%s", username, serverName)
 			http.Error(w, "Execute permission required", http.StatusForbidden)
 			return
 		}
@@ -204,13 +204,13 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 		defer cancel()
 
 		// 共通のマネージャーを介して非同期または連鎖的なアクション（停止前コマンド等）を実行する。
-		if err := s.ContainerManager.ExecuteAction(ctx, id, action); err != nil {
+		if err := s.ContainerManager.ExecuteAction(ctx, serverName, action); err != nil {
 			// アクションの失敗は、コンテナの状態不整合やリソース不足などの内部問題（Internal）として扱う。
-			logger.Logf("Internal", "API", "コンテナ %s へのアクション %s 実行失敗: %v", id, action, err)
+			logger.Logf("Internal", "API", "コンテナ %s へのアクション %s 実行失敗: %v", serverName, action, err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		logger.Logf("Internal", "API", "アクション実行成功: container=%s, action=%s", id, action)
+		logger.Logf("Internal", "API", "アクション実行成功: container=%s, action=%s", serverName, action)
 		w.WriteHeader(http.StatusOK)
 	}
 }
@@ -218,11 +218,11 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 // MARK: ListBackups()
 // 指定コンテナのバックアップ世代一覧を返す。
 func (s *Server) ListBackups(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+	serverName := r.URL.Query().Get("id")
 
-	generations, err := s.ContainerManager.ListBackupGenerations(id)
+	generations, err := s.ContainerManager.ListBackupGenerations(serverName)
 	if err != nil {
-		logger.Logf("Internal", "API", "バックアップ世代一覧取得失敗: container=%s, err=%v", id, err)
+		logger.Logf("Internal", "API", "バックアップ世代一覧取得失敗: container=%s, err=%v", serverName, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -236,7 +236,7 @@ func (s *Server) ListBackups(w http.ResponseWriter, r *http.Request) {
 // MARK: RestoreAction()
 // 世代を指定してコンテナのバックアップから復元するハンドラー。
 func (s *Server) RestoreAction(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+	serverName := r.URL.Query().Get("id")
 	generation := r.URL.Query().Get("generation")
 
 	token := r.Header.Get("Authorization")
@@ -247,8 +247,8 @@ func (s *Server) RestoreAction(w http.ResponseWriter, r *http.Request) {
 	username := s.WebSessions[token]
 	s.WebSessionMu.RUnlock()
 
-	if !s.Config.Get().Users[username].HasPermission(id, "execute") {
-		logger.Logf("Client", "API", "Restore拒否: user=%s, target=%s", username, id)
+	if !s.Config.Get().Users[username].HasPermission(serverName, "execute") {
+		logger.Logf("Client", "API", "Restore拒否: user=%s, target=%s", username, serverName)
 		http.Error(w, "Execute permission required", http.StatusForbidden)
 		return
 	}
@@ -259,19 +259,19 @@ func (s *Server) RestoreAction(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	// 世代パラメータを受けて直接 Restore を呼び出す。
-	if err := s.ContainerManager.Restore(ctx, id, generation); err != nil {
-		logger.Logf("Internal", "API", "コンテナ %s のリストア失敗 (generation=%s): %v", id, generation, err)
+	if err := s.ContainerManager.Restore(ctx, serverName, generation); err != nil {
+		logger.Logf("Internal", "API", "コンテナ %s のリストア失敗 (generation=%s): %v", serverName, generation, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	logger.Logf("Internal", "API", "リストア成功: container=%s, generation=%s", id, generation)
+	logger.Logf("Internal", "API", "リストア成功: container=%s, generation=%s", serverName, generation)
 	w.WriteHeader(http.StatusOK)
 }
 
 // MARK: CmdContainer()
 // コンテナの標準入力(stdin)に対してコマンドを送信する。
 func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
-	id := r.URL.Query().Get("id")
+	serverName := r.URL.Query().Get("id")
 
 	token := r.Header.Get("Authorization")
 	if token == "" {
@@ -281,8 +281,8 @@ func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 	username := s.WebSessions[token]
 	s.WebSessionMu.RUnlock()
 
-	if !s.Config.Get().Users[username].HasPermission(id, "write") {
-		logger.Logf("Client", "API", "Cmd拒否: user=%s, target=%s", username, id)
+	if !s.Config.Get().Users[username].HasPermission(serverName, "write") {
+		logger.Logf("Client", "API", "Cmd拒否: user=%s, target=%s", username, serverName)
 		http.Error(w, "Write permission required", http.StatusForbidden)
 		return
 	}
@@ -298,13 +298,13 @@ func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 指定されたコンテナに対して生のコマンド文字列を流し込む。
-	if err := docker.SendCommand(id, payload.Command); err != nil {
+	if err := docker.SendCommand(serverName, payload.Command); err != nil {
 		// 送信失敗は接続断などの内部的な要因（Internal）として扱う。
-		logger.Logf("Internal", "API", "コンテナ %s へのコマンド送信失敗: %v", id, err)
+		logger.Logf("Internal", "API", "コンテナ %s へのコマンド送信失敗: %v", serverName, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	logger.Logf("Internal", "API", "コマンド送信成功: container=%s, cmd_len=%d", id, len(payload.Command))
+	logger.Logf("Internal", "API", "コマンド送信成功: container=%s, cmd_len=%d", serverName, len(payload.Command))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -312,7 +312,7 @@ func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 // コンテナの過去ログを特定行数取得する。無限スクロール等の用途に使用。
 func (s *Server) GetContainerLogs(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	id := q.Get("id")
+	serverName := q.Get("id")
 	tail := q.Get("tail")
 	if tail == "" {
 		tail = "100" // デフォルトは直近100行とする
@@ -327,9 +327,9 @@ func (s *Server) GetContainerLogs(w http.ResponseWriter, r *http.Request) {
 		Tail:       tail,
 	}
 
-	logs, err := docker.Client.ContainerLogs(r.Context(), id, logOptions)
+	logs, err := docker.Client.ContainerLogs(r.Context(), serverName, logOptions)
 	if err != nil {
-		logger.Logf("Internal", "API", "過去ログの取得に失敗: container=%s, err=%v", id, err)
+		logger.Logf("Internal", "API", "過去ログの取得に失敗: container=%s, err=%v", serverName, err)
 		http.Error(w, "Failed to get logs", http.StatusInternalServerError)
 		return
 	}
@@ -338,7 +338,7 @@ func (s *Server) GetContainerLogs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	// xterm.jsでそのまま扱えるよう、バイナリ（ANSIコード含む）をデマルチプレクスして出力する。
 	// TTYが有効な場合はそのままio.Copy可能だが、ログモードでは通常TTYなしとなるためStdCopyを使用。
-	inspect, err := docker.Client.ContainerInspect(r.Context(), id)
+	inspect, err := docker.Client.ContainerInspect(r.Context(), serverName)
 	if err == nil && inspect.Config.Tty {
 		io.Copy(w, logs)
 	} else {
