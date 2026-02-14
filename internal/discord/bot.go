@@ -39,18 +39,19 @@ func (m *BotManager) SyncBots() {
 	newChannelToServer := make(map[string]string)
 	activeTokens := make(map[string]bool)
 
-	// 設定にある各サーバーから、有効なDiscordトークンとチャンネルIDの紐付けを抽出する。
+	// 設定にある各サーバーから、チャンネルIDの紐付けとBotトークンを抽出する。
 	for serverName, serverCfg := range cfg.Servers {
 		if serverCfg.Discord == nil {
 			continue
 		}
-		token := serverCfg.Discord.Token
-		if token == "" {
-			continue
-		}
-		activeTokens[token] = true
+		// チャンネル指定がある場合は、トークンの有無に関わらず管理対象として紐付ける。
 		if channelID := serverCfg.Discord.Channel; channelID != "" {
 			newChannelToServer[channelID] = serverName
+		}
+
+		token := serverCfg.Discord.Token
+		if token != "" {
+			activeTokens[token] = true
 		}
 	}
 

@@ -1,7 +1,6 @@
 package discord
 
 import (
-	"context"
 	"sync"
 	"time"
 
@@ -21,8 +20,8 @@ type BotManager struct {
 	ChannelUpdatedAt time.Time
 	mu               sync.RWMutex
 
-	// ログ転送管理：各コンテナのログ監視プロセスを制御するためのキャンセル関数を保持。
-	ActiveForwarders map[string]context.CancelFunc
+	// ログ転送管理：各コンテナのログ監視プロセスを制御するための情報を保持。
+	ActiveForwarders map[string]*forwarderState
 	ForwarderMu      sync.RWMutex
 }
 
@@ -34,7 +33,7 @@ func NewBotManager(cfg *config.LoadedConfig, cm *container.Manager) *BotManager 
 		ContainerManager: cm,
 		Sessions:         make(map[string]*discordgo.Session),
 		ChannelToServer:  make(map[string]string),
-		ActiveForwarders: make(map[string]context.CancelFunc),
+		ActiveForwarders: make(map[string]*forwarderState),
 	}
 }
 

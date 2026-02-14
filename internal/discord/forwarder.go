@@ -26,6 +26,12 @@ type LogRule struct {
 	Res     []*regexp.Regexp
 }
 
+type forwarderState struct {
+	cancel     context.CancelFunc
+	logSetting string
+	webhookURL string
+}
+
 // ログルールの読み込み状態を保持するキャッシュ構造体。
 type logRulesState struct {
 	rules      []LogRule
@@ -52,14 +58,28 @@ func (m *BotManager) SyncLogForwarders() {
 		activeServers[serverName] = true
 
 		m.ForwarderMu.RLock()
-		_, exists := m.ActiveForwarders[serverName]
+		state, exists := m.ActiveForwarders[serverName]
 		m.ForwarderMu.RUnlock()
+
+		// 設定が変更されている場合は一旦停止して再起動する。
+		if exists && (state.logSetting != serverCfg.Discord.LogSetting || state.webhookURL != serverCfg.Discord.Webhook) {
+			state.cancel()
+			m.ForwarderMu.Lock()
+			delete(m.ActiveForwarders, serverName)
+			m.ForwarderMu.Unlock()
+			exists = false
+			logger.Logf("Internal", "Discord", "ログ転送の設定変更を検知しました。再起動します: %s", serverName)
+		}
 
 		if !exists {
 			// 新たに監視対象となったコンテナに対して、追跡用の単一ゴルーチンを生成する。
 			ctx, cancel := context.WithCancel(context.Background())
 			m.ForwarderMu.Lock()
-			m.ActiveForwarders[serverName] = cancel
+			m.ActiveForwarders[serverName] = &forwarderState{
+				cancel:     cancel,
+				logSetting: serverCfg.Discord.LogSetting,
+				webhookURL: serverCfg.Discord.Webhook,
+			}
 			m.ForwarderMu.Unlock()
 
 			go m.tailContainerLogs(ctx, serverName, serverCfg.Discord.LogSetting, serverCfg.Discord.Webhook)
@@ -69,9 +89,9 @@ func (m *BotManager) SyncLogForwarders() {
 
 	// 構成解除されたサーバーの転送プロセスを、コンテキストを通じて安全に終了させる。
 	m.ForwarderMu.Lock()
-	for serverName, cancel := range m.ActiveForwarders {
+	for serverName, state := range m.ActiveForwarders {
 		if !activeServers[serverName] {
-			cancel()
+			state.cancel()
 			delete(m.ActiveForwarders, serverName)
 			logger.Logf("Internal", "Discord", "ログ転送を停止しました: %s", serverName)
 		}
@@ -136,7 +156,7 @@ func (m *BotManager) tailContainerLogs(ctx context.Context, serverName, logSetti
 						// JSONで定義された複数のWebhookメッセージを順次処理
 						for _, rawPayload := range rule.Webhook {
 							// プレースホルダーの置換を再帰的に実行
-							payload := replacePlaceholders(rawPayload, matches)
+							payload := replacePlaceholders(rawPayload, matches, serverName)
 							m.executeWebhook(webhookURL, payload)
 						}
 						break
@@ -221,10 +241,13 @@ func loadLogRules(path string) ([]LogRule, error) {
 	return rules, nil
 }
 
-// replacePlaceholders は map や slice 内の文字列にある $1, $2 などを再帰的に置換します。
-func replacePlaceholders(data any, matches []string) any {
+// replacePlaceholders は map や slice 内の文字列にある $1, $2, ${server} などを再帰的に置換します。
+func replacePlaceholders(data any, matches []string, serverName string) any {
 	switch v := data.(type) {
 	case string:
+		// サーバー名の置換
+		v = strings.ReplaceAll(v, "${server}", serverName)
+		// 正規表現キャプチャの置換
 		for i, match := range matches {
 			placeholder := fmt.Sprintf("$%d", i)
 			v = strings.ReplaceAll(v, placeholder, match)
@@ -233,13 +256,13 @@ func replacePlaceholders(data any, matches []string) any {
 	case map[string]any:
 		newMap := make(map[string]any)
 		for k, val := range v {
-			newMap[k] = replacePlaceholders(val, matches)
+			newMap[k] = replacePlaceholders(val, matches, serverName)
 		}
 		return newMap
 	case []any:
 		newSlice := make([]any, len(v))
 		for i, val := range v {
-			newSlice[i] = replacePlaceholders(val, matches)
+			newSlice[i] = replacePlaceholders(val, matches, serverName)
 		}
 		return newSlice
 	default:
