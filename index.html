@@ -274,18 +274,19 @@
       }
 
       .metric-value {
-        font-size: 15px;
+        font-size: 13px;
         font-weight: bold;
         color: var(--accent);
         margin-bottom: 8px;
       }
 
       .progress-bg {
-        height: 4px;
+        height: 6px;
         background: #333;
-        border-radius: 2px;
+        border-radius: 3px;
         margin-bottom: 4px;
         overflow: hidden;
+        position: relative;
       }
 
       .progress-fill {
@@ -293,6 +294,19 @@
         background: var(--accent);
         width: 0%;
         transition: width 0.3s;
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+
+      .progress-fill.os-usage {
+        background: #888;
+        opacity: 0.3;
+        z-index: 1;
+      }
+
+      .progress-fill:not(.os-usage) {
+        z-index: 2;
       }
 
       .info-grid {
@@ -587,14 +601,16 @@
 
       <div id="detail-panel">
         <div class="metric-card">
-          <div class="metric-label">CPU Usage</div>
+          <div class="metric-label">CPU (this / total / host)</div>
           <div class="metric-value" id="cpu-text">-</div>
           <div class="progress-bg">
+            <div id="cpu-bar-os" class="progress-fill os-usage"></div>
             <div id="cpu-bar" class="progress-fill"></div>
           </div>
-          <div class="metric-label">Memory Usage</div>
+          <div class="metric-label">Memory (this / total / host)</div>
           <div class="metric-value" id="mem-text">-</div>
           <div class="progress-bg">
+            <div id="mem-bar-os" class="progress-fill os-usage"></div>
             <div id="mem-bar" class="progress-fill"></div>
           </div>
           <div class="metric-label">PID</div>
@@ -1000,9 +1016,23 @@
 
         updateActionDropdown();
 
-        // 切断してUIリセット
-        disconnectTerminal();
+        // 切断してUIリセット (ターミナルのみ)
+        if (wsTerm) {
+          wsTerm.close();
+          wsTerm = null;
+        }
+        if (termDataListener) {
+          termDataListener.dispose();
+          termDataListener = null;
+        }
+        term.reset();
+        currentTermMode = "";
+        document.getElementById("term-placeholder").style.display = "flex";
+        toggleTermButtons(false);
+        updateCommandBarState();
+
         loadInspectData(id);
+        startStats(id);
       }
 
       function updateActionDropdown() {
@@ -1054,9 +1084,9 @@
 
       // MARK: disconnectTerminal()
       // WebSocket を閉じ、ターミナルのリセットと UI 状態の初期化を行う。
-      function disconnectTerminal() {
+      function disconnectTerminal(closeStats = false) {
         if (wsTerm) wsTerm.close();
-        if (wsStats) wsStats.close();
+        if (closeStats && wsStats) wsStats.close();
         if (termDataListener) {
           termDataListener.dispose();
           termDataListener = null;
@@ -1190,12 +1220,9 @@
       // WebSocket を介して、コンテナのログストリームまたは双方向 Exec シェルに接続する。
       function connectTerminal(mode) {
         if (!selectedId) return;
-        disconnectTerminal();
+        disconnectTerminal(false); // Statsは継続したいので false
         currentTermMode = mode;
         document.getElementById("term-placeholder").style.display = "none";
-
-        // 統計データのポーリングも同時に開始する。
-        startStats(selectedId);
 
         // 接続試行。 token による認証をクエリパラメータ経由で付与。
         // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
@@ -1240,32 +1267,65 @@
               e.data instanceof Blob ? await e.data.text() : e.data,
             );
 
-            // デルタ計算を行い、全コア平均の CPU 使用率をパーセント表記に変換。
+            // CPU計算
+            const onlineCpus = s.cpu_stats.online_cpus || 1;
+            // コンテナの使用率 (1コア=100%換算)
             const cpuDelta =
               s.cpu_stats.cpu_usage.total_usage -
               s.precpu_stats.cpu_usage.total_usage;
             const sysDelta =
               s.cpu_stats.system_cpu_usage - s.precpu_stats.system_cpu_usage;
-            const cpu =
+            const containerCpu =
               sysDelta > 0
-                ? (
-                    (cpuDelta / sysDelta) *
-                    100 *
-                    s.cpu_stats.online_cpus
-                  ).toFixed(2)
+                ? ((cpuDelta / sysDelta) * 100 * onlineCpus).toFixed(1)
                 : 0;
+            const osStats = s.os_stats || {};
+            const osCpu = ((osStats.cpu_percent || 0) * onlineCpus).toFixed(1);
+            const hostCpu = onlineCpus * 100;
 
-            const memUsed = (s.memory_stats.usage / 1024 / 1024).toFixed(1);
+            // メモリ計算 (MiB)
+            const memUsed = s.memory_stats.usage / 1024 / 1024;
+            const memLimit = s.memory_stats.limit / 1024 / 1024;
+            const osMemUsed = (osStats.memory_used || 0) / 1024 / 1024;
+            const osMemTotal = (osStats.memory_total || 0) / 1024 / 1024;
+
             const memPct = (
               (s.memory_stats.usage / s.memory_stats.limit) *
               100
             ).toFixed(1);
 
-            document.getElementById("cpu-text").innerText = `${cpu}%`;
-            document.getElementById("cpu-bar").style.width =
-              `${Math.min(cpu, 100)}%`;
-            document.getElementById("mem-text").innerText = `${memUsed} MiB`;
-            document.getElementById("mem-bar").style.width = `${memPct}%`;
+            // 表示更新
+            document.getElementById("cpu-text").innerText =
+              `${containerCpu}% / ${osCpu}% / ${hostCpu}%`;
+
+            const cpuBarOs = document.getElementById("cpu-bar-os");
+            cpuBarOs.style.width = `${Math.min((osCpu / hostCpu) * 100, 100)}%`;
+
+            const cpuBar = document.getElementById("cpu-bar");
+            cpuBar.style.width = `${Math.min((containerCpu / hostCpu) * 100, 100)}%`;
+            cpuBar.style.background =
+              containerCpu < 50
+                ? "var(--success)"
+                : containerCpu < 80
+                  ? "var(--warning)"
+                  : "var(--danger)";
+
+            // メモリ表示: Container / OS / Host
+            document.getElementById("mem-text").innerText =
+              `${memUsed.toFixed(0)} / ${osMemUsed.toFixed(0)} / ${osMemTotal.toFixed(0)} MiB`;
+
+            const memBarOs = document.getElementById("mem-bar-os");
+            const osMemPct = ((osMemUsed / osMemTotal) * 100).toFixed(1);
+            memBarOs.style.width = `${Math.min(osMemPct, 100)}%`;
+
+            const memBar = document.getElementById("mem-bar");
+            memBar.style.width = `${memPct}%`;
+            memBar.style.background =
+              memPct < 50
+                ? "var(--success)"
+                : memPct < 80
+                  ? "var(--warning)"
+                  : "var(--danger)";
           } catch (err) {}
         };
       }

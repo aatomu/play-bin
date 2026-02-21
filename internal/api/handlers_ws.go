@@ -1,15 +1,19 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gorilla/websocket"
 	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
+	"github.com/shirou/gopsutil/v3/cpu"
+	"github.com/shirou/gopsutil/v3/mem"
 )
 
 var wsUpgrader = websocket.Upgrader{
@@ -188,7 +192,7 @@ func (s *Server) StatsHandler() http.HandlerFunc {
 		}
 		defer ws.Close()
 
-		// Docker SDKからストリーム形式で統計情報を取得し続け、そのままWebSocketへ流し込む。
+		// Docker SDKからストリーム形式で統計情報を取得し続け、OS全体の情報を付与してWebSocketへ流し込む。
 		stats, err := docker.Client.ContainerStats(r.Context(), id, true)
 		if err != nil {
 			logger.Logf("Internal", "API", "統計情報取得失敗: container=%s, err=%v", id, err)
@@ -196,7 +200,36 @@ func (s *Server) StatsHandler() http.HandlerFunc {
 		}
 		defer stats.Body.Close()
 
-		// JSON形式のストリームをWebSocketのBinaryMessageとして逐次転送する。
-		io.Copy(&wsBinaryWriter{ws}, stats.Body)
+		decoder := json.NewDecoder(stats.Body)
+		for {
+			var dockerStats map[string]any
+			if err := decoder.Decode(&dockerStats); err != nil {
+				if err == io.EOF {
+					break
+				}
+				logger.Logf("Internal", "API", "Docker統計デコード失敗: %v", err)
+				break
+			}
+
+			// OS全体の情報を取得 (サンプリング間隔を持たせて安定させる)
+			v, _ := mem.VirtualMemory()
+			c, _ := cpu.Percent(200*time.Millisecond, false)
+
+			// 情報を付与
+			osStats := map[string]any{
+				"memory_used_percent": v.UsedPercent,
+				"memory_total":        v.Total,
+				"memory_used":         v.Total - v.Available, // htop 等に近い「直感的な」使用量 (Total - Available)
+				"cpu_percent":         0.0,
+			}
+			if len(c) > 0 {
+				osStats["cpu_percent"] = c[0]
+			}
+			dockerStats["os_stats"] = osStats
+
+			if err := ws.WriteJSON(dockerStats); err != nil {
+				break
+			}
+		}
 	}
 }
