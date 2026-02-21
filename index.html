@@ -938,6 +938,19 @@
             headers: { Authorization: token },
           });
           const items = await res.json();
+
+          // MARK: Sort()
+          // コンテナを表示順（名前の昇順）にソートする。
+          items.sort((a, b) => {
+            const nameA = (
+              a.names && a.names[0] ? a.names[0].replace("/", "") : "Unknown"
+            ).toLowerCase();
+            const nameB = (
+              b.names && b.names[0] ? b.names[0].replace("/", "") : "Unknown"
+            ).toLowerCase();
+            return nameA.localeCompare(nameB);
+          });
+
           const listTarget = document.getElementById("list-target");
 
           // 動的にリストを生成し、クリックイベントを紐づける。
