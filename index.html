@@ -1167,7 +1167,11 @@
 
         let p = "";
         const pb = info?.HostConfig?.PortBindings || {};
-        for (let k in pb) p += `<div>${k} ➔ ${pb[k][0].HostPort}</div>`;
+        for (let k in pb) {
+          const containerPort = k;
+          const hostPort = pb[k][0].HostPort;
+          p += `<div><span style="color:var(--accent)">${containerPort}</span> ➔ <span style="color:var(--success)">${hostPort}</span></div>`;
+        }
         document.getElementById("info-ports").innerHTML = p || "none";
 
         document.getElementById("info-mounts").innerHTML =
