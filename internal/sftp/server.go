@@ -8,15 +8,14 @@ import (
 	"net"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/pkg/sftp"
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
 	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
+	"github.com/play-bin/internal/vfs"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -154,9 +153,11 @@ func (s *Server) handleConn(nConn net.Conn) {
 
 		// 仮想ファイルシステム（VFS）ハンドラの構築。ホストの直接アクセスは許可せず、マウント点のみを見せる。
 		username := sConn.Permissions.Extensions["user"]
-		rootHandler := &vfsHandler{
-			username: username,
-			config:   s.Config,
+		rootHandler := &sftpHandler{
+			handler: &vfs.Handler{
+				Username: username,
+				Config:   s.Config,
+			},
 		}
 
 		// SFTP リクエスト（開く、読む、書く、消すなど）を VFS ハンドラへマッピングする。
@@ -173,100 +174,35 @@ func (s *Server) handleConn(nConn net.Conn) {
 	}
 }
 
-var (
-	// VFS 内の特殊な階層（コンテナ一覧、マウント一覧）を識別するための内部エラー定数。
-	errVfsRoot          = fmt.Errorf("vfs_root")
-	errVfsContainerRoot = fmt.Errorf("vfs_container_root")
-)
-
-// MARK: vfsHandler
-// ホスト上の実ディレクトリを秘匿し、ユーザーにはコンテナ名とマウント先のみをディレクトリとして提示する。
-type vfsHandler struct {
-	username string
-	config   *config.LoadedConfig
-}
-
-// MARK: mapPath()
-// ユーザーが指定した仮想パスを、ホスト上の物理パスに厳密に解決・バリデートする。
-func (h *vfsHandler) mapPath(path string) (string, error) {
-	path = filepath.Clean(path)
-	parts := strings.Split(strings.Trim(path, "/"), string(filepath.Separator))
-
-	// SFTP ルート階層（全ての「コンテナ名」が並ぶ階層）の要求。
-	if len(parts) == 0 || (len(parts) == 1 && parts[0] == "") {
-		return "", errVfsRoot
-	}
-
-	containerName := parts[0]
-	cfg := h.config.Get()
-	user, userOk := cfg.Users[h.username]
-	if !userOk {
-		return "", os.ErrPermission
-	}
-
-	// 指定されたコンテナに対し、このユーザーが操作を許可されているか（read権限）を確認。
-	if !user.HasPermission(containerName, config.PermContainerRead) {
-		// 権限のないアクセス試行は Client コンテキストで警告として記録。
-		logger.Logf("Client", "SFTP", "アクセス拒否: user=%s, path=%s", h.username, path)
-		return "", os.ErrPermission
-	}
-
-	if _, ok := cfg.Servers[containerName]; !ok {
-		return "", os.ErrNotExist
-	}
-
-	// コンテナの中（マウントポイント一覧）の要求。
-	if len(parts) == 1 {
-		return "", errVfsContainerRoot
-	}
-
-	// 仮想パス（例：/server1/config/settings.yml）から
-	// マウント設定（例：/server1/config -> /home/user/mc/config）を検索。
-	targetSubPath := parts[1]
-
-	// コンテナの実体からマウント情報を動的に取得する（設定ファイルには依存しない）。
-	inspect, err := docker.Client.ContainerInspect(context.Background(), containerName)
-	if err != nil {
-		logger.Logf("Internal", "SFTP", "コンテナ %s の詳細取得失敗: %v", containerName, err)
-		return "", os.ErrNotExist
-	}
-
-	for _, m := range inspect.Mounts {
-		cPath := strings.Trim(m.Destination, "/")
-		if cPath == targetSubPath {
-			// マウントポイントより下位の相対パスを抽出し、ホスト上の実パスと結合する。
-			rel, _ := filepath.Rel(targetSubPath, strings.Join(parts[1:], "/"))
-			return filepath.Join(m.Source, rel), nil
-		}
-	}
-
-	// マウントされていないパスへのアクセスは許可しない。
-	return "", os.ErrNotExist
+// MARK: sftpHandler
+// internal/vfs.Handler を SFTP プロトコルに適合させるためのアダプター。
+type sftpHandler struct {
+	handler *vfs.Handler
 }
 
 // MARK: Filelist()
-// ディレクトリ内のファイル・フォルダ一覧を、VFS レイヤー（仮想）または実ファイルシステム（物理）から生成する。
-func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
-	fullPath, err := h.mapPath(r.Filepath)
+// ディレクトリ内のファイル・フォルダ一覧を生成する。
+func (h *sftpHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
+	fullPath, err := h.handler.MapPath(r.Filepath)
 
 	// セキュリティ監査のため、ディレクトリ一覧の取得は常に記録する。
-	logger.Logf("Client", "SFTP", "ディレクトリ一覧取得: user=%s, path=%s", h.username, r.Filepath)
+	logger.Logf("Client", "SFTP", "ディレクトリ一覧取得: user=%s, path=%s", h.handler.Username, r.Filepath)
 
 	if err != nil {
 		// ルート階層：許可されたコンテナ名を一覧として返す。
-		if err == errVfsRoot {
-			cfg := h.config.Get()
-			user := cfg.Users[h.username]
+		if err == vfs.ErrVfsRoot {
+			cfg := h.handler.Config.Get()
+			user := cfg.Users[h.handler.Username]
 			var items []os.FileInfo
 			for name := range cfg.Servers {
 				if user.HasPermission(name, config.PermContainerRead) {
-					items = append(items, &vfsFileInfo{name: name, isDir: true})
+					items = append(items, vfs.NewFileInfo(name, true))
 				}
 			}
 			return &listerAt{items: items}, nil
 		}
 		// コンテナ直下：設定されたマウントポイント名を一覧として返す。
-		if err == errVfsContainerRoot {
+		if err == vfs.ErrVfsContainerRoot {
 			containerName := strings.Trim(r.Filepath, "/")
 			var items []os.FileInfo
 
@@ -275,7 +211,7 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			if err == nil {
 				for _, m := range inspect.Mounts {
 					name := strings.Trim(m.Destination, "/")
-					items = append(items, &vfsFileInfo{name: name, isDir: true})
+					items = append(items, vfs.NewFileInfo(name, true))
 				}
 			} else {
 				logger.Logf("Internal", "SFTP", "コンテナ %s のマウント一覧取得失敗: %v", containerName, err)
@@ -299,80 +235,76 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 }
 
 // MARK: Fileread()
-// 物理ファイルの中身を取り出す。事前に mapPath によるマウント境界チェックが行われるため安全。
-func (h *vfsHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
-	fullPath, err := h.mapPath(r.Filepath)
+// 物理ファイルの中身を取り出す。
+func (h *sftpHandler) Fileread(r *sftp.Request) (io.ReaderAt, error) {
+	fullPath, err := h.handler.MapPath(r.Filepath)
 	if err != nil {
 		return nil, err
 	}
 	// トレーサビリティのため、ダウンロード操作を記録。
-	logger.Logf("Client", "SFTP", "ファイル読込: user=%s, path=%s", h.username, r.Filepath)
+	logger.Logf("Client", "SFTP", "ファイル読込: user=%s, path=%s", h.handler.Username, r.Filepath)
 	return os.Open(fullPath)
 }
 
 // MARK: Filewrite()
-// 物理ファイルへデータを上書き・追記する。マウント境界の外への脱出は不可。
-func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
+// 物理ファイルへデータを上書き・追記する。
+func (h *sftpHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	// 書き込み操作には write 権限が必要
 	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
-	cfg := h.config.Get()
-	user := cfg.Users[h.username]
+	cfg := h.handler.Config.Get()
+	user := cfg.Users[h.handler.Username]
 	if !user.HasPermission(containerName, config.PermFileWrite) {
 		return nil, os.ErrPermission
 	}
 
-	fullPath, err := h.mapPath(r.Filepath)
+	fullPath, err := h.handler.MapPath(r.Filepath)
 	if err != nil {
 		return nil, err
 	}
 	// データの変更を伴う操作のため、確実にログへ残す。
-	logger.Logf("Client", "SFTP", "ファイル書込: user=%s, path=%s", h.username, r.Filepath)
-	// 常に新規作成、または既存の内容を破棄して書き込むモードで開く（SFTP クライアントの挙動に準拠）。
+	logger.Logf("Client", "SFTP", "ファイル書込: user=%s, path=%s", h.handler.Username, r.Filepath)
+	// 常に新規作成、または既存の内容を破棄して書き込むモードで開く。
 	return os.OpenFile(fullPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 }
 
 // MARK: Filecmd()
 // ファイルの削除、フォルダ作成、名前変更等の「構成変更」コマンドを処理する。
-func (h *vfsHandler) Filecmd(r *sftp.Request) error {
+func (h *sftpHandler) Filecmd(r *sftp.Request) error {
 	// 変更操作には write 権限が必要
 	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
-	cfg := h.config.Get()
-	user := cfg.Users[h.username]
+	cfg := h.handler.Config.Get()
+	user := cfg.Users[h.handler.Username]
 	if !user.HasPermission(containerName, config.PermFileWrite) {
 		return os.ErrPermission
 	}
 
-	fullPath, err := h.mapPath(r.Filepath)
+	fullPath, err := h.handler.MapPath(r.Filepath)
 	if err != nil {
 		return err
 	}
 
 	// 管理者によるファイル削除等は事後の不備確認に不可欠なため、メソッド名を含めて記録。
-	logger.Logf("Client", "SFTP", "構成変更操作 (%s): user=%s, path=%s", r.Method, h.username, r.Filepath)
+	logger.Logf("Client", "SFTP", "構成変更操作 (%s): user=%s, path=%s", r.Method, h.handler.Username, r.Filepath)
 
 	switch r.Method {
 	case "Setstat":
 		// パーミッション等の微調整は、環境の整合性担保のため一律無視（または成功扱い）とする。
 		return nil
 	case "Rename":
-		// 移動先パスも同様に mapPath を通じて仮想パスからの解決・検証を行う。
-		targetPath, err := h.mapPath(r.Target)
+		// 移動先パス解決
+		targetPath, err := h.handler.MapPath(r.Target)
 		if err != nil {
 			return err
 		}
-		logger.Logf("Client", "SFTP", "リネーム対象: %s -> %s (user=%s)", r.Filepath, r.Target, h.username)
+		logger.Logf("Client", "SFTP", "リネーム対象: %s -> %s (user=%s)", r.Filepath, r.Target, h.handler.Username)
 		return os.Rename(fullPath, targetPath)
 	case "Rmdir":
-		// 中身ごと削除。再帰的に処理するため注意が必要。
 		return os.RemoveAll(fullPath)
 	case "Mkdir":
-		// パスが深くても一括で作成を試みる。
 		return os.MkdirAll(fullPath, 0755)
 	case "Remove":
-		// 単一ファイルの削除。
 		return os.Remove(fullPath)
 	case "Symlink":
-		// セキュリティ上の複雑さを回避し、ホスト環境の予期せぬ露出を防ぐため禁止する。
 		return logger.ClientError("SFTP", "シンボリックリンクの作成は許可されていません")
 	}
 	return nil
@@ -385,7 +317,6 @@ type listerAt struct {
 }
 
 // MARK: ListAt()
-// クライアントが一度に読み取れる量に合わせて、必要分のみのリストを詰め替えて返す。
 func (l *listerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
 	if offset >= int64(len(l.items)) {
 		return 0, io.EOF
@@ -396,22 +327,3 @@ func (l *listerAt) ListAt(ls []os.FileInfo, offset int64) (int, error) {
 	}
 	return n, nil
 }
-
-// MARK: vfsFileInfo
-// 物理的なファイルが存在しない仮想階層（コンテナ名など）を、SFTP クライアントがディレクトリとして認識できるように振る舞わせる。
-type vfsFileInfo struct {
-	name  string
-	isDir bool
-}
-
-func (f *vfsFileInfo) Name() string { return f.name }
-func (f *vfsFileInfo) Size() int64  { return 0 }
-func (f *vfsFileInfo) Mode() os.FileMode {
-	if f.isDir {
-		return os.ModeDir | 0755
-	}
-	return 0644
-}
-func (f *vfsFileInfo) ModTime() time.Time { return time.Now() }
-func (f *vfsFileInfo) IsDir() bool        { return f.isDir }
-func (f *vfsFileInfo) Sys() any           { return nil }

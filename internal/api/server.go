@@ -7,6 +7,7 @@ import (
 	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
 	"github.com/play-bin/internal/logger"
+	"github.com/play-bin/internal/webdav"
 )
 
 // Server はAPIサーバーの本体を表す。
@@ -59,6 +60,11 @@ func (s *Server) Routes() http.Handler {
 	// ターミナルの入力同期やリソース使用率のリアルタイム配信のためにWebSocketを利用する。
 	mux.HandleFunc("/ws/terminal", s.Auth(s.TerminalHandler()))
 	mux.HandleFunc("/ws/stats", s.Auth(s.StatsHandler()))
+
+	// MARK: > WebDAV integration
+	// /dav/ 配下へのアクセスを WebDAV ハンドラーへ委譲する。
+	ws := webdav.NewServer(s.Config)
+	mux.Handle("/dav/", ws.Handler())
 
 	// 全てのリクエストに対してアクセスログを出力する共通ラッパーを適用する。
 	return s.WithLogging(mux)

@@ -25,6 +25,7 @@
         "stdcopy",
         "stdr",
         "Upgrader",
+        "webdav",
         "winio",
         "xxhash"
     ]
