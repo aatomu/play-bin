@@ -205,7 +205,7 @@ func (h *vfsHandler) mapPath(path string) (string, error) {
 	}
 
 	// 指定されたコンテナに対し、このユーザーが操作を許可されているか（read権限）を確認。
-	if !user.HasPermission(containerName, "read") {
+	if !user.HasPermission(containerName, config.PermContainerRead) {
 		// 権限のないアクセス試行は Client コンテキストで警告として記録。
 		logger.Logf("Client", "SFTP", "アクセス拒否: user=%s, path=%s", h.username, path)
 		return "", os.ErrPermission
@@ -259,7 +259,7 @@ func (h *vfsHandler) Filelist(r *sftp.Request) (sftp.ListerAt, error) {
 			user := cfg.Users[h.username]
 			var items []os.FileInfo
 			for name := range cfg.Servers {
-				if user.HasPermission(name, "read") {
+				if user.HasPermission(name, config.PermContainerRead) {
 					items = append(items, &vfsFileInfo{name: name, isDir: true})
 				}
 			}
@@ -317,7 +317,7 @@ func (h *vfsHandler) Filewrite(r *sftp.Request) (io.WriterAt, error) {
 	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
 	cfg := h.config.Get()
 	user := cfg.Users[h.username]
-	if !user.HasPermission(containerName, "write") {
+	if !user.HasPermission(containerName, config.PermFileWrite) {
 		return nil, os.ErrPermission
 	}
 
@@ -338,7 +338,7 @@ func (h *vfsHandler) Filecmd(r *sftp.Request) error {
 	containerName := strings.Split(strings.Trim(r.Filepath, "/"), "/")[0]
 	cfg := h.config.Get()
 	user := cfg.Users[h.username]
-	if !user.HasPermission(containerName, "write") {
+	if !user.HasPermission(containerName, config.PermFileWrite) {
 		return os.ErrPermission
 	}
 

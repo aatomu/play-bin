@@ -10,6 +10,7 @@ import (
 	ctypes "github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/pkg/stdcopy"
 	"github.com/gorilla/websocket"
+	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
 	"github.com/shirou/gopsutil/v3/cpu"
@@ -56,7 +57,7 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 		// 指定されたモードに応じて、適切なDockerストリームを初期化する。
 		switch mode {
 		case "exec":
-			if !user.HasPermission(id, "write") {
+			if !user.HasPermission(id, config.PermContainerWrite) {
 				logger.Logf("Client", "API", "WS Exec拒否: user=%s, target=%s", username, id)
 				http.Error(w, "Write permission required", http.StatusForbidden)
 				return
@@ -81,7 +82,7 @@ func (s *Server) TerminalHandler() http.HandlerFunc {
 			logger.Logf("Internal", "API", "Exec接続を開始しました: container=%s", id)
 
 		case "logs":
-			if !user.HasPermission(id, "read") {
+			if !user.HasPermission(id, config.PermContainerRead) {
 				logger.Logf("Client", "API", "WS Logs拒否: user=%s, target=%s", username, id)
 				http.Error(w, "Read permission required", http.StatusForbidden)
 				return
@@ -179,7 +180,7 @@ func (s *Server) StatsHandler() http.HandlerFunc {
 		s.WebSessionMu.RUnlock()
 
 		user := s.Config.Get().Users[username]
-		if !user.HasPermission(id, "read") {
+		if !user.HasPermission(id, config.PermContainerRead) {
 			// 統計情報の取得はRead権限が必要
 			http.Error(w, "Read permission required", http.StatusForbidden)
 			return

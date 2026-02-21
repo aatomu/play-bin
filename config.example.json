@@ -6,7 +6,23 @@
       "discord": "123456789012345678",
       "password": "strongpassword",
       "permissions": {
-        "*": ["read", "write", "execute"]
+        "*": ["*"]
+      }
+    },
+    "viewer": {
+      "password": "viewonlypassword",
+      "permissions": {
+        "minecraft-1": ["container.read"]
+      }
+    },
+    "operator": {
+      "password": "operpassword",
+      "permissions": {
+        "*": [
+          "container.read",
+          "container.execute.start",
+          "container.execute.stop"
+        ]
       }
     }
   },

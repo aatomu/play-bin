@@ -659,7 +659,7 @@
       let containerListTimer = null; // コンテナ一覧取得のポーリングタイマー
 
       let actionMap = {}; // APIから取得したコンテナごとの利用可能アクション
-      let permissionMap = {}; // APIから取得したコンテナごとの権限 (read/write/execute)
+      let permissionMap = {}; // APIから取得したコンテナごとの権限 (container.read/container.write/...)
       let selectedActions = [];
       let selectedPermissions = [];
 
@@ -684,7 +684,7 @@
 
         // 接続かつ、操作モードである場合のみ送信を許可することで、誤送信によるエラーを防止する。
         // また、write権限がない場合は入力を受け付けない。
-        const canWrite = selectedPermissions.includes("write");
+        const canWrite = selectedPermissions.includes("container.write");
         if (isConnected && currentTermMode && canWrite) {
           input.disabled = false;
           input.placeholder =
@@ -1137,8 +1137,8 @@
         controls.style.pointerEvents = "auto";
 
         // ログ表示やExecはコンテナが実在（RunningまたはStopped）している必要がある。
-        const hasRead = selectedPermissions.includes("read");
-        const hasWrite = selectedPermissions.includes("write");
+        const hasRead = selectedPermissions.includes("container.read");
+        const hasWrite = selectedPermissions.includes("container.write");
 
         const btnLogs = document.getElementById("btn-logs");
         const btnExec = document.getElementById("btn-exec");
@@ -1227,7 +1227,7 @@
         // 接続試行。 token による認証をクエリパラメータ経由で付与。
         // 初回表示の負荷を抑えるため、Streaming開始時は直近1000行程度に絞る。
         wsTerm = new WebSocket(
-          `ws://${location.host}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}&tail=${logTailCount}`,
+          `${window.location.origin}/ws/terminal?id=${selectedId}&mode=${mode}&token=${token}&tail=${logTailCount}`,
         );
         wsTerm.binaryType = "arraybuffer";
 
@@ -1259,7 +1259,7 @@
       function startStats(id) {
         if (wsStats) wsStats.close();
         wsStats = new WebSocket(
-          `ws://${location.host}/ws/stats?id=${id}&token=${token}`,
+          `${window.location.origin}/ws/stats?id=${id}&token=${token}`,
         );
         wsStats.onmessage = async (e) => {
           try {

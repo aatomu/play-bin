@@ -63,8 +63,8 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 
 	// 1. 設定ファイルにあるサーバーを優先的に処理する。
 	for serverName, serverCfg := range cfg.Servers {
-		// 権限がないサーバーはリスト自体に表示させない。
-		if !user.HasPermission(serverName, "read") {
+		// 認可チェック。指定されたコンテナ名が許可リストに含まれているか確認する。
+		if !user.HasPermission(serverName, config.PermContainerRead) {
 			continue
 		}
 
@@ -83,14 +83,15 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 		// 利用可能なアクションを計算する
 		item.Actions = s.calculateActions(user, serverName, serverCfg)
 		// 権限リストも付与する（フロントエンドでのボタン制御用）
-		if user.HasPermission(serverName, "read") {
-			item.Permissions = append(item.Permissions, "read")
+		// 権限リストの付与
+		if user.HasPermission(serverName, config.PermContainerRead) {
+			item.Permissions = append(item.Permissions, config.PermContainerRead)
 		}
-		if user.HasPermission(serverName, "write") {
-			item.Permissions = append(item.Permissions, "write")
+		if user.HasPermission(serverName, config.PermContainerWrite) {
+			item.Permissions = append(item.Permissions, config.PermContainerWrite)
 		}
-		if user.HasPermission(serverName, "execute") {
-			item.Permissions = append(item.Permissions, "execute")
+		if user.HasPermission(serverName, config.PermContainerExecute) {
+			item.Permissions = append(item.Permissions, config.PermContainerExecute)
 		}
 		result = append(result, item)
 	}
@@ -101,7 +102,7 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		name := c.Names[0][1:]
-		if processedDockerNames[name] || !user.HasPermission(name, "read") {
+		if processedDockerNames[name] || !user.HasPermission(name, config.PermContainerRead) {
 			continue
 		}
 
@@ -112,13 +113,13 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 			State: c.State,
 		}
 		// 権限リストも付与
-		if user.HasPermission(name, "read") {
-			item.Permissions = append(item.Permissions, "read")
+		if user.HasPermission(name, config.PermContainerRead) {
+			item.Permissions = append(item.Permissions, config.PermContainerRead)
 		}
-		if user.HasPermission(name, "write") {
-			item.Permissions = append(item.Permissions, "write")
+		if user.HasPermission(name, config.PermContainerWrite) {
+			item.Permissions = append(item.Permissions, config.PermContainerWrite)
 		}
-		if user.HasPermission(name, "execute") {
+		if user.HasPermission(name, config.PermContainerExecute) {
 			item.Permissions = append(item.Permissions, "execute")
 		}
 		result = append(result, item)
@@ -131,11 +132,28 @@ func (s *Server) ListContainers(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func containerToPerm(a container.Action) string {
+	switch a {
+	case container.ActionStart:
+		return config.PermContainerStart
+	case container.ActionStop:
+		return config.PermContainerStop
+	case container.ActionKill:
+		return config.PermContainerKill
+	case container.ActionBackup:
+		return config.PermContainerBackup
+	case container.ActionRemove:
+		return config.PermContainerRemove
+	default:
+		return config.PermContainerExecute
+	}
+}
+
 // MARK: calculateActions()
 // ユーザー権限とサーバー設定に基づいて、実行可能なアクションのリストを生成する。
 func (s *Server) calculateActions(user config.UserConfig, name string, cfg config.ServerConfig) []string {
 	// execute権限がない場合はアクションなし
-	if !user.HasPermission(name, "execute") {
+	if !user.HasPermission(name, config.PermContainerExecute) {
 		return []string{}
 	}
 
@@ -192,7 +210,7 @@ func (s *Server) Action(action container.Action) http.HandlerFunc {
 		username := s.WebSessions[token]
 		s.WebSessionMu.RUnlock()
 
-		if !s.Config.Get().Users[username].HasPermission(serverName, "execute") {
+		if !s.Config.Get().Users[username].HasPermission(serverName, containerToPerm(action)) {
 			logger.Logf("Client", "API", "Action拒否: user=%s, target=%s", username, serverName)
 			http.Error(w, "Execute permission required", http.StatusForbidden)
 			return
@@ -247,7 +265,7 @@ func (s *Server) RestoreAction(w http.ResponseWriter, r *http.Request) {
 	username := s.WebSessions[token]
 	s.WebSessionMu.RUnlock()
 
-	if !s.Config.Get().Users[username].HasPermission(serverName, "execute") {
+	if !s.Config.Get().Users[username].HasPermission(serverName, config.PermContainerRestore) {
 		logger.Logf("Client", "API", "Restore拒否: user=%s, target=%s", username, serverName)
 		http.Error(w, "Execute permission required", http.StatusForbidden)
 		return
@@ -281,7 +299,7 @@ func (s *Server) CmdContainer(w http.ResponseWriter, r *http.Request) {
 	username := s.WebSessions[token]
 	s.WebSessionMu.RUnlock()
 
-	if !s.Config.Get().Users[username].HasPermission(serverName, "write") {
+	if !s.Config.Get().Users[username].HasPermission(serverName, config.PermContainerWrite) {
 		logger.Logf("Client", "API", "Cmd拒否: user=%s, target=%s", username, serverName)
 		http.Error(w, "Write permission required", http.StatusForbidden)
 		return

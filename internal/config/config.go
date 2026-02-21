@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,29 +33,79 @@ type UserConfig struct {
 	Permissions map[string][]string `json:"permissions"`
 }
 
+const (
+	// File permissions
+	PermFileRead  = "file.read"
+	PermFileWrite = "file.write"
+
+	// Container permissions
+	PermContainerRead    = "container.read"
+	PermContainerWrite   = "container.write"
+	PermContainerExecute = "container.execute.*"
+
+	PermContainerStart   = "container.execute.start"
+	PermContainerStop    = "container.execute.stop"
+	PermContainerKill    = "container.execute.kill"
+	PermContainerBackup  = "container.execute.backup"
+	PermContainerRestore = "container.execute.restore"
+	PermContainerRemove  = "container.execute.remove"
+)
+
 // HasPermission checks if the user has the specified permission for the given server.
-// It checks specific server permissions first, then wildcards.
-func (u UserConfig) HasPermission(serverName, perm string) bool {
+// It supports hierarchical permissions with wildcards (e.g., "container.*" matches "container.read").
+func (u UserConfig) HasPermission(serverName, requiredPerm string) bool {
 	if u.Permissions == nil {
 		return false
 	}
-	// Check specific server permissions
-	if perms, ok := u.Permissions[serverName]; ok {
-		for _, p := range perms {
-			if p == perm {
-				return true
-			}
-		}
+
+	// 1. Check specific server permissions
+	if checkPermission(u.Permissions[serverName], requiredPerm) {
+		return true
 	}
-	// Check wildcard permissions
-	if perms, ok := u.Permissions["*"]; ok {
-		for _, p := range perms {
-			if p == perm {
-				return true
-			}
+
+	// 2. Check wildcard server permissions
+	if checkPermission(u.Permissions["*"], requiredPerm) {
+		return true
+	}
+
+	return false
+}
+
+// checkPermission performs hierarchical wildcard matching for a list of permissions.
+func checkPermission(userPerms []string, required string) bool {
+	for _, p := range userPerms {
+		if matchRecursive(p, required) {
+			return true
 		}
 	}
 	return false
+}
+
+// matchRecursive compare user permission and required permission with dot notation and wildcard support.
+// e.g., "container.*" matches "container.read"
+func matchRecursive(userPerm, required string) bool {
+	if userPerm == "*" {
+		return true
+	}
+	if userPerm == required {
+		return true
+	}
+
+	userParts := strings.Split(userPerm, ".")
+	reqParts := strings.Split(required, ".")
+
+	for i := 0; i < len(userParts); i++ {
+		if userParts[i] == "*" {
+			return true
+		}
+		if i >= len(reqParts) || userParts[i] != reqParts[i] {
+			return false
+		}
+	}
+
+	// If userPerm finished without wildcard but reqPerm is longer, it's not a match.
+	// unless userPerm is exactly reqPerm (handled above).
+	return len(userParts) == len(reqParts)
 }
 
 type ServerConfig struct {

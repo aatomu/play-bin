@@ -11,8 +11,24 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
 - `users: map<username: string, UserConfig>` - ユーザー設定
   - `discord?: string` - ユーザーのDiscord ID
   - `password: string` - Web UIおよびSFTPログインに使用するパスワード
-  - `permissions: map<servername: string, ("read" | "write" | "execute")[]>` - 操作権限の設定
-    `servername`に`*`を指定するとすべてのサーバーに対して権限を設定
+  - `permissions: map<servername: string, string[]>` - 操作権限の設定
+    `servername` に `*` を指定するとすべてのサーバーに対して権限を設定します。ドット記法とワイルドカード（`*`）による階層的な権限管理に対応しています。
+
+    **利用可能な権限一覧:**
+    - `*` : すべての権限
+    - `file.*` : ファイル操作全般
+      - `file.read` : ファイルの閲覧・ダウンロード
+      - `file.write` : ファイルのアップロード・編集・削除
+    - `container.read` : コンテナ情報の閲覧・ログ表示
+    - `container.write` : コンテナへのコマンド送信（コンソール入力）
+    - `container.execute.*` : コンテナ操作全般
+      - `container.execute.start` : コンテナの起動
+      - `container.execute.stop` : コンテナの停止（停止コマンドの実行）
+      - `container.execute.kill` : コンテナの強制停止
+      - `container.execute.backup` : バックアップの実行
+      - `container.execute.restore` : リストアの実行
+      - `container.execute.remove` : コンテナの削除
+
 - `servers: map<servername: string, ServerConfig>` - サーバー設定
   - `workingDir?: string` - 作業ディレクトリ
   - `compose?: Object` - コンテナ定義
@@ -70,7 +86,7 @@ Dockerコンテナとして稼働するゲームサーバー等を、Web UIやDi
       "discord": "123456789012345678",
       "password": "strongpassword",
       "permissions": {
-        "*": ["read", "write", "execute"]
+        "*": ["*"]
       }
     }
   },

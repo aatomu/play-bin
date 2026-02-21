@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/play-bin/internal/config"
 	"github.com/play-bin/internal/container"
 	"github.com/play-bin/internal/docker"
 	"github.com/play-bin/internal/logger"
@@ -191,13 +192,14 @@ func (m *BotManager) onInteractionCreate(dg *discordgo.Session, i *discordgo.Int
 	var requiredPerm string
 	switch i.ApplicationCommandData().Name {
 	case "action":
-		requiredPerm = "execute"
+		act := i.ApplicationCommandData().Options[0].StringValue()
+		requiredPerm = containerToPerm(container.Action(act))
 	case "backups":
-		requiredPerm = "read"
+		requiredPerm = config.PermContainerRead
 	case "cmd":
-		requiredPerm = "write"
+		requiredPerm = config.PermContainerWrite
 	default:
-		requiredPerm = "read"
+		requiredPerm = config.PermContainerRead
 	}
 
 	// ユーザー情報と権限リストを照合し、権限のない操作をブロックする。
@@ -361,5 +363,22 @@ func (m *BotManager) interactionSuccessEmbed(act string, desc string) *discordgo
 		Color:       colorSuccess,
 		Title:       fmt.Sprintf("実行成功: %s", act),
 		Description: desc,
+	}
+}
+
+func containerToPerm(a container.Action) string {
+	switch a {
+	case container.ActionStart:
+		return config.PermContainerStart
+	case container.ActionStop:
+		return config.PermContainerStop
+	case container.ActionKill:
+		return config.PermContainerKill
+	case container.ActionBackup:
+		return config.PermContainerBackup
+	case container.ActionRemove:
+		return config.PermContainerRemove
+	default:
+		return config.PermContainerExecute
 	}
 }
